@@ -121,6 +121,7 @@ const dt_iop_order_entry_t legacy_order[] = {
   { {27.5f }, "blurs", 0},
   { {27.5f }, "basicadj", 0},
   { {27.5f }, "primaries", 0},
+  { { 27.5f }, "negconvert", 0 },
   { {28.0f }, "colorreconstruct", 0},
   { {29.0f }, "colorchecker", 0},
   { {30.0f }, "defringe", 0},
@@ -230,6 +231,7 @@ const dt_iop_order_entry_t v30_order[] = {
                                      // profile
   { {28.5f }, "blurs", 0},           // physically-accurate blurs (motion and lens)
   { {28.5f }, "primaries", 0},
+  { { 28.5f }, "negconvert", 0 },
   { {29.0f }, "nlmeans", 0},         // signal processing (denoising)
                                      //    -> needs a signal as scene-referred as possible (even if it works in Lab)
   { {30.0f }, "colorchecker", 0},    // calibration to "neutral" exchange colour space
@@ -353,6 +355,7 @@ const dt_iop_order_entry_t v50_order[] = {
                                      // profile
   { {28.5f }, "blurs", 0},           // physically-accurate blurs (motion and lens)
   { {28.5f }, "primaries", 0},
+  { { 28.5f }, "negconvert", 0 },
   { {29.0f }, "nlmeans", 0},         // signal processing (denoising)
                                      //    -> needs a signal as scene-referred as possible (even if it works in Lab)
   { {30.0f }, "colorchecker", 0},    // calibration to "neutral" exchange colour space
@@ -475,6 +478,7 @@ const dt_iop_order_entry_t v30_jpg_order[] = {
   { { 28.5f }, "negadoctor", 0 },   // Cineon film encoding comes after scanner input color profile
   { { 28.5f }, "blurs", 0 },        // physically-accurate blurs (motion and lens)
   { { 28.5f }, "primaries", 0},
+  { { 28.5f }, "negconvert", 0 },
   { { 29.0f }, "nlmeans", 0 },      // signal processing (denoising)
                                     //    -> needs a signal as scene-referred as possible (even if it works in Lab)
   { { 30.0f }, "colorchecker", 0 }, // calibration to "neutral" exchange colour space
@@ -601,6 +605,7 @@ const dt_iop_order_entry_t v50_jpg_order[] = {
   { { 28.5f }, "negadoctor", 0 },   // Cineon film encoding comes after scanner input color profile
   { { 28.5f }, "blurs", 0 },        // physically-accurate blurs (motion and lens)
   { { 28.5f }, "primaries", 0},
+  { { 28.5f }, "negconvert", 0 },
   { { 29.0f }, "nlmeans", 0 },      // signal processing (denoising)
                                     //    -> needs a signal as scene-referred as possible (even if it works in Lab)
   { { 30.0f }, "colorchecker", 0 }, // calibration to "neutral" exchange colour space
@@ -752,6 +757,7 @@ void dt_ioppr_migrate_legacy_iop_order_list(GList *iop_order_list)
   _insert_before_after(iop_order_list, "negadoctor", "contrastntexture", TRUE);
   _insert_before_after(iop_order_list, "negadoctor", "censorize", TRUE);
   _insert_before_after(iop_order_list, "negadoctor", "primaries", TRUE);
+  _insert_before_after(iop_order_list, "negadoctor", "negconvert", TRUE);
   _insert_before_after(iop_order_list, "rgbcurve", "colorbalancergb", TRUE);
   _insert_before_after(iop_order_list, "rgbcurve", "satcurvergb", TRUE);
   _insert_before_after(iop_order_list, "ashift", "cacorrectrgb", TRUE);
