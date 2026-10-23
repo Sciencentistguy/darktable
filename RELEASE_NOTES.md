@@ -230,6 +230,12 @@ changes (where available).
 
 ## Other Changes
 
+- Added a negative convert module for turning film negative scans
+  into positives. It measures the film base and the density range of
+  the negative, either with pickers or automatically from the image,
+  and offers tone, white balance, split-toning color balance, clipping
+  with soft highlight and shadow rolloff, and a choice of looks.
+
 - AgX and sigmoid now adapt to HDR output, so one edit exports to
   SDR, HLG and PQ alike. HLG output peaks at 1000 nits, and PQ output
   at the new "PQ peak" setting of the export module, 1000 nits by
