@@ -848,7 +848,7 @@ void gui_init(dt_iop_module_t *self)
                                                    "this sets the black and white density sliders automatically, "
                                                    "so they should usually not be modified by hand.\n"
                                                    "the film base does not need to be set for this"));
-  dt_action_define_iop(self, N_("pickers"), N_("density range"), g->analyze_picker, &dt_action_def_color_picker);
+  dt_action_define_iop(self, N_("pickers"), N_("density"), g->analyze_picker, &dt_action_def_color_picker);
 
   dt_gui_box_add(page, dt_ui_section_label_new(C_("section", "film base")), g->base_picker);
   _triplet_slider(self, (const char *[]){ "base[0]", "base[1]", "base[2]" }, g->base,
@@ -877,8 +877,8 @@ void gui_init(dt_iop_module_t *self)
 
   GtkWidget *density_box = dt_gui_vbox();
   dt_gui_box_add(page, density_box);
-  dt_gui_new_collapsible_section(&g->density_section, "plugins/darkroom/negconvert/expand_density_range",
-                                 _("density range"), GTK_BOX(density_box), DT_ACTION(self));
+  dt_gui_new_collapsible_section(&g->density_section, "plugins/darkroom/negconvert/expand_channel_densities",
+                                 _("channel densities"), GTK_BOX(density_box), DT_ACTION(self));
   self->widget = GTK_WIDGET(g->density_section.container);
 
   _triplet_slider(self, (const char *[]){ "black_density[0]", "black_density[1]", "black_density[2]" },
