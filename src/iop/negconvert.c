@@ -103,10 +103,10 @@ typedef enum dt_iop_negconvert_density_t
 
 typedef enum dt_iop_negconvert_tone_t
 {
-  DT_NEGCONVERT_TONE_STANDARD = 0,  // $DESCRIPTION: "standard"
-  DT_NEGCONVERT_TONE_CINEMATIC = 1, // $DESCRIPTION: "cinematic"
-  DT_NEGCONVERT_TONE_NEUTRAL = 2,   // $DESCRIPTION: "neutral"
-  DT_NEGCONVERT_TONE_LINEAR = 3     // $DESCRIPTION: "linear"
+  DT_NEGCONVERT_TONE_LINEAR = 0,    // $DESCRIPTION: "linear"
+  DT_NEGCONVERT_TONE_STANDARD = 1,  // $DESCRIPTION: "standard"
+  DT_NEGCONVERT_TONE_CINEMATIC = 2, // $DESCRIPTION: "cinematic"
+  DT_NEGCONVERT_TONE_NEUTRAL = 3    // $DESCRIPTION: "neutral"
 } dt_iop_negconvert_tone_t;
 
 typedef enum dt_iop_negconvert_curve_t
@@ -124,8 +124,9 @@ typedef enum dt_iop_negconvert_curve_t
   DT_NEGCONVERT_CURVE_RICH = 10           // $DESCRIPTION: "rich"
 } dt_iop_negconvert_curve_t;
 
-// standard and cinematic have a measured base curve, neutral and linear have none
-#define TONE_BASES 2
+// standard and cinematic have a measured base curve, neutral and linear have none; the table is indexed by
+// profile, so it has an unused row for linear
+#define TONE_BASES (DT_NEGCONVERT_TONE_CINEMATIC + 1)
 #define LOOK_CURVES 11
 #define TONE_KNOTS 17
 
@@ -157,7 +158,7 @@ typedef struct dt_iop_negconvert_params_t
   float white_density[4];                        // $MIN: 0.05 $MAX: 5.0 $DEFAULT: 1.5 $DESCRIPTION: "white density"
   dt_iop_negconvert_color_method_t color_method; // $DEFAULT: DT_NEGCONVERT_SHADOW_WEIGHTED $DESCRIPTION: "color method"
   dt_iop_negconvert_density_t color_density;     // $DEFAULT: DT_NEGCONVERT_ADD_DENSITY $DESCRIPTION: "color density"
-  dt_iop_negconvert_tone_t tone_profile;         // $DEFAULT: DT_NEGCONVERT_TONE_STANDARD $DESCRIPTION: "tone profile"
+  dt_iop_negconvert_tone_t tone_profile;         // $DEFAULT: DT_NEGCONVERT_TONE_LINEAR $DESCRIPTION: "tone profile"
   dt_iop_negconvert_curve_t look_curve;          // $DEFAULT: DT_NEGCONVERT_CURVE_NONE $DESCRIPTION: "look curve"
   float temp;                                    // $MIN: -100.0 $MAX: 100.0 $DEFAULT: 0.0 $DESCRIPTION: "temp"
   float tint;                                    // $MIN: -100.0 $MAX: 100.0 $DEFAULT: 0.0 $DESCRIPTION: "tint"
@@ -1026,17 +1027,17 @@ void gui_init(dt_iop_module_t *self)
   gtk_widget_set_tooltip_text(w, _("add density: temp and tint shift the density before the tone profile\n"
                                    "neutral density: temp and tint scale the result, keeping luminance"));
   w = dt_bauhaus_combobox_from_params(self, "tone_profile");
-  gtk_widget_set_tooltip_text(w, _("base response applied to the normalized density, after negative lab pro's "
-                                   "profiles.\n"
+  gtk_widget_set_tooltip_text(w, _("base response applied to the normalized density. "
+                                   "all but linear follow negative lab pro's profiles.\n"
+                                   "linear: the normalized density as it is, with no curve; "
+                                   "the only profile that goes below black, where shadow rolloff applies\n"
                                    "standard: bold contrast like a lab scanner, with a brightness correction "
                                    "that analyze sets from the picked area (auto density). "
                                    "negative lab pro calls it lab\n"
                                    "cinematic: a logarithmic response with smooth mids and shadows "
                                    "and detail kept in the highlights (negative lab pro's cinematic log)\n"
                                    "neutral: a plain response, for flat results to grade later "
-                                   "(negative lab pro calls it linear)\n"
-                                   "linear: the normalized density as it is, with no curve; "
-                                   "the only profile that goes below black, where shadow rolloff applies"));
+                                   "(negative lab pro calls it linear)"));
   w = dt_bauhaus_combobox_from_params(self, "look_curve");
   gtk_widget_set_tooltip_text(w, _("fixed curve on top of the tone profile. "
                                    "negative lab pro pairs them as lab soft, hard, highlight and shadow soft and hard; "
