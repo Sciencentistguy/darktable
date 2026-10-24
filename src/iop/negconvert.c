@@ -919,12 +919,18 @@ void gui_init(dt_iop_module_t *self)
   dt_gui_box_add(page, dt_ui_section_label_new(C_("section", "white balance")), g->wb_picker, g->auto_wb);
   g->temp = w = dt_bauhaus_slider_from_params(self, "temp");
   dt_bauhaus_slider_set_soft_range(w, -30.0f, 30.0f);
+  dt_bauhaus_slider_set_stop(w, 0.0, 0.3, 0.3, 1);
+  dt_bauhaus_slider_set_stop(w, 0.5, 0.5, 0.5, 0.5);
+  dt_bauhaus_slider_set_stop(w, 1.0, 1, 1, 0.25);
   gtk_widget_set_tooltip_text(w, _(
                                    "shifts the color balance along the blue/yellow axis\n"
                                    "positive values warm the image, negative values cool it\n"
                                    "the film base picker neutralizes the orange mask; use this for the rest"));
   g->tint = w = dt_bauhaus_slider_from_params(self, "tint");
   dt_bauhaus_slider_set_soft_range(w, -30.0f, 30.0f);
+  dt_bauhaus_slider_set_stop(w, 0.0, 0.25, 1, 0.25);
+  dt_bauhaus_slider_set_stop(w, 0.5, 0.5, 0.5, 0.5);
+  dt_bauhaus_slider_set_stop(w, 1.0, 1, 0.25, 1);
   gtk_widget_set_tooltip_text(w, _(
                                    "shifts the color balance along the green/magenta axis\n"
                                    "positive values add magenta, negative values add green"));
