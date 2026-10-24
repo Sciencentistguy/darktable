@@ -653,14 +653,8 @@ static void _unbalanced_density(dt_iop_module_t *self, const float transmittance
   }
 }
 
-static void _apply_wb(dt_iop_module_t *self)
-{
-  float x[3];
-  _unbalanced_density(self, self->picked_color, x);
-  _set_balance(self, x);
-}
-
 static void _apply_analysis(dt_iop_module_t *self);
+static void _apply_area_wb(dt_iop_module_t *self);
 
 void color_picker_apply(dt_iop_module_t *self, GtkWidget *picker, dt_dev_pixelpipe_t *pipe)
 {
@@ -669,31 +663,31 @@ void color_picker_apply(dt_iop_module_t *self, GtkWidget *picker, dt_dev_pixelpi
   if(picker == g->base_picker)
     _apply_base(self);
   else if(picker == g->wb_picker)
-    _apply_wb(self);
+    _apply_area_wb(self);
   else if(picker == g->analyze_picker)
     _apply_analysis(self);
   else
     dt_print(DT_DEBUG_ALWAYS, "[negconvert] unknown color picker");
 }
 
-// transmittance at the given cumulative fraction, counted from the dark end
+// transmittance at the given cumulative fraction, counted from the dark end, interpolated within its bin
 static float _histogram_percentile(const uint32_t *const hist, const float fraction)
 {
   uint64_t total = 0;
   for(int i = 0; i < ANALYSIS_BINS; i++) total += hist[i];
   const double target = fraction * (double)total;
   double sum = 0.0;
-  int bin = ANALYSIS_BINS - 1;
+  float position = ANALYSIS_BINS;
   for(int i = 0; i < ANALYSIS_BINS; i++)
   {
-    sum += hist[i];
-    if(sum >= target)
+    if(hist[i] && sum + hist[i] >= target)
     {
-      bin = i;
+      position = i + (float)((target - sum) / hist[i]);
       break;
     }
+    sum += hist[i];
   }
-  return exp2f((bin + 0.5f) / ANALYSIS_BINS_PER_EV - 32.0f);
+  return exp2f(position / ANALYSIS_BINS_PER_EV - 32.0f);
 }
 
 // density range from the picked area: the thinnest and densest parts of each channel
@@ -725,6 +719,23 @@ static void _apply_analysis(dt_iop_module_t *self)
   DT_LEAVE_GUI_UPDATE();
 
   dt_dev_add_history_item(darktable.develop, self, TRUE);
+}
+
+// white balance from the picked area: the median of each channel is assumed to be neutral
+static void _apply_area_wb(dt_iop_module_t *self)
+{
+  dt_iop_negconvert_gui_data_t *g = self->gui_data;
+
+  float median[3];
+  dt_iop_gui_enter_critical_section(self);
+  const gboolean valid = g->area_valid;
+  for(int c = 0; c < 3; c++) median[c] = _histogram_percentile(g->area_analysis[c], 0.5f);
+  dt_iop_gui_leave_critical_section(self);
+  if(!valid) return;
+
+  float x[3];
+  _unbalanced_density(self, median, x);
+  _set_balance(self, x);
 }
 
 // white balance from the image itself: the median of each channel is assumed to be neutral
@@ -883,7 +894,8 @@ void gui_init(dt_iop_module_t *self)
   g->wb_picker = dt_color_picker_new(self, DT_COLOR_PICKER_AREA, NULL);
   gtk_widget_set_tooltip_text(g->wb_picker, _("pick an area that should be neutral gray in the positive, "
                                               "such as a gray card, a white shirt or a concrete wall.\n"
-                                              "sets temp and tint so the area has no color cast.\n"
+                                              "sets temp and tint so the median of each channel in the area has no color cast, "
+                                              "so dust and stray pixels in it do not matter.\n"
                                               "set the film base and density range first, "
                                               "as they define the response the balance is computed from"));
   dt_action_define_iop(self, N_("pickers"), N_("white balance"), g->wb_picker, &dt_action_def_color_picker);
