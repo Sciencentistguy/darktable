@@ -703,6 +703,15 @@ static void _apply_base(dt_iop_module_t *self)
   dt_dev_add_history_item(darktable.develop, self, TRUE);
 }
 
+// keep temp and tint within their range by shortening the shift, not clamping each one, so its hue survives
+static void _store_balance(dt_iop_negconvert_params_t *p, const float temp, const float tint)
+{
+  const float longest = fmaxf(fabsf(temp), fabsf(tint));
+  const float scale = longest > 100.0f ? 100.0f / longest : 1.0f;
+  p->temp = scale * temp;
+  p->tint = scale * tint;
+}
+
 // temp and tint shift the channels by (temp, -tint, -temp). hue is the angle of that shift on the usual
 // hexagonal chroma plane (0 red, 60 yellow, 120 green, 180 cyan, 240 blue, 300 magenta) and strength its
 // length; the common part of the shift is brightness and has no hue
@@ -758,14 +767,18 @@ static void _hue_strength_changed(GtkWidget *widget, dt_iop_module_t *self)
   dt_iop_negconvert_params_t *p = self->params;
 
   const float hue = dt_bauhaus_slider_get(g->hue);
+  const float strength = dt_bauhaus_slider_get(g->strength);
   float temp, tint;
-  _hue_to_temp_tint(hue, dt_bauhaus_slider_get(g->strength), &temp, &tint);
-  p->temp = CLAMP(temp, -100.0f, 100.0f);
-  p->tint = CLAMP(tint, -100.0f, 100.0f);
+  _hue_to_temp_tint(hue, strength, &temp, &tint);
+  _store_balance(p, temp, tint);
+
+  float stored_hue, stored_strength;
+  _temp_tint_to_hue(p->temp, p->tint, &stored_hue, &stored_strength);
 
   DT_ENTER_GUI_UPDATE();
   dt_bauhaus_slider_set(g->temp, p->temp);
   dt_bauhaus_slider_set(g->tint, p->tint);
+  if(stored_strength < strength) dt_bauhaus_slider_set(g->strength, stored_strength);
   _paint_strength(g, hue);
   DT_LEAVE_GUI_UPDATE();
 
@@ -796,8 +809,7 @@ static void _set_balance(dt_iop_module_t *self, const float x[3])
     temp = 0.5f * (ly[2] - ly[0]);
     tint = ly[1] - 0.5f * (ly[0] + ly[2]);
   }
-  p->temp = CLAMP(temp / BALANCE_SCALE, -100.0f, 100.0f);
-  p->tint = CLAMP(tint / BALANCE_SCALE, -100.0f, 100.0f);
+  _store_balance(p, temp / BALANCE_SCALE, tint / BALANCE_SCALE);
 
   DT_ENTER_GUI_UPDATE();
   dt_bauhaus_slider_set(g->temp, p->temp);
