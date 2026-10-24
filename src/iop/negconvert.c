@@ -103,7 +103,7 @@ typedef enum dt_iop_negconvert_density_t
 
 typedef enum dt_iop_negconvert_tone_t
 {
-  DT_NEGCONVERT_TONE_LAB = 0,       // $DESCRIPTION: "lab"
+  DT_NEGCONVERT_TONE_STANDARD = 0,  // $DESCRIPTION: "standard"
   DT_NEGCONVERT_TONE_CINEMATIC = 1, // $DESCRIPTION: "cinematic"
   DT_NEGCONVERT_TONE_NEUTRAL = 2,   // $DESCRIPTION: "neutral"
   DT_NEGCONVERT_TONE_LINEAR = 3     // $DESCRIPTION: "linear"
@@ -111,7 +111,7 @@ typedef enum dt_iop_negconvert_tone_t
 
 typedef enum dt_iop_negconvert_curve_t
 {
-  DT_NEGCONVERT_CURVE_STANDARD = 0,       // $DESCRIPTION: "standard"
+  DT_NEGCONVERT_CURVE_NONE = 0,           // $DESCRIPTION: "none"
   DT_NEGCONVERT_CURVE_SOFT = 1,           // $DESCRIPTION: "soft"
   DT_NEGCONVERT_CURVE_HARD = 2,           // $DESCRIPTION: "hard"
   DT_NEGCONVERT_CURVE_HIGHLIGHT_SOFT = 3, // $DESCRIPTION: "highlight soft"
@@ -124,9 +124,9 @@ typedef enum dt_iop_negconvert_curve_t
   DT_NEGCONVERT_CURVE_RICH = 10           // $DESCRIPTION: "rich"
 } dt_iop_negconvert_curve_t;
 
-// lab and cinematic have a measured base curve, neutral and linear have none
+// standard and cinematic have a measured base curve, neutral and linear have none
 #define TONE_BASES 2
-#define TONE_CURVES 11
+#define LOOK_CURVES 11
 #define TONE_KNOTS 17
 
 typedef enum dt_iop_negconvert_look_t
@@ -157,8 +157,8 @@ typedef struct dt_iop_negconvert_params_t
   float white_density[4];                        // $MIN: 0.05 $MAX: 5.0 $DEFAULT: 1.5 $DESCRIPTION: "white density"
   dt_iop_negconvert_color_method_t color_method; // $DEFAULT: DT_NEGCONVERT_SHADOW_WEIGHTED $DESCRIPTION: "color method"
   dt_iop_negconvert_density_t color_density;     // $DEFAULT: DT_NEGCONVERT_ADD_DENSITY $DESCRIPTION: "color density"
-  dt_iop_negconvert_tone_t tone_profile;         // $DEFAULT: DT_NEGCONVERT_TONE_LAB $DESCRIPTION: "tone profile"
-  dt_iop_negconvert_curve_t tone_curve;          // $DEFAULT: DT_NEGCONVERT_CURVE_STANDARD $DESCRIPTION: "tone curve"
+  dt_iop_negconvert_tone_t tone_profile;         // $DEFAULT: DT_NEGCONVERT_TONE_STANDARD $DESCRIPTION: "tone profile"
+  dt_iop_negconvert_curve_t look_curve;          // $DEFAULT: DT_NEGCONVERT_CURVE_NONE $DESCRIPTION: "look curve"
   float temp;                                    // $MIN: -100.0 $MAX: 100.0 $DEFAULT: 0.0 $DESCRIPTION: "temp"
   float tint;                                    // $MIN: -100.0 $MAX: 100.0 $DEFAULT: 0.0 $DESCRIPTION: "tint"
   float whites;                                  // $MIN: -100.0 $MAX: 100.0 $DEFAULT: 0.0 $DESCRIPTION: "whites"
@@ -189,7 +189,7 @@ typedef struct dt_iop_negconvert_params_t
   float analyze_black;                           // $MIN: 0.01 $MAX: 20.0 $DEFAULT: 1.0 $DESCRIPTION: "black percentile"
   float analyze_white;                           // $MIN: 0.01 $MAX: 20.0 $DEFAULT: 1.0 $DESCRIPTION: "white percentile"
   float contrast;                                // $MIN: -100.0 $MAX: 100.0 $DEFAULT: 0.0 $DESCRIPTION: "contrast"
-  float lab_density;                             // $MIN: -0.5 $MAX: 0.5 $DEFAULT: 0.0 $DESCRIPTION: "lab density"
+  float auto_density;                             // $MIN: -0.5 $MAX: 0.5 $DEFAULT: 0.0 $DESCRIPTION: "auto density"
 } dt_iop_negconvert_params_t;
 
 typedef struct dt_iop_negconvert_data_t
@@ -215,7 +215,7 @@ typedef struct dt_iop_negconvert_gui_data_t
   GtkWidget *base_picker, *wb_picker, *analyze_picker;
   GtkWidget *analyze_black, *analyze_white;
   dt_gui_collapsible_section_t density_section;
-  GtkWidget *temp, *tint, *lab_density, *shadow_rolloff;
+  GtkWidget *temp, *tint, *auto_density, *shadow_rolloff;
   GtkWidget *auto_wb;
   // filled by the preview pipe, read by the gui thread, both under the module lock
   uint32_t analysis[3][ANALYSIS_BINS];
@@ -377,12 +377,12 @@ static inline float _bump(const float x, const float c, const float w)
   return fmaxf(0.0f, 1.0f - fabsf(x - c) / w);
 }
 
-// nlp's profiles split into a base profile and a curve on top of it: every lab profile is a fixed curve of lab
+// nlp's profiles split into a base profile and a curve on top of it: every nlp lab profile is a fixed curve of lab
 // standard, and cinematic rich and flat of cinematic log, where cinematic flat uses the same curve as nlp's linear
 // flat. each table is the median of nlp's output against the input over the same pixels, sampled at 0, 1/16, ... 1.
 // the bases are display-encoded curves of u, the output of nlp's linear profile
 static const float _base_curves[TONE_BASES][TONE_KNOTS] = {
-  [DT_NEGCONVERT_TONE_LAB]
+  [DT_NEGCONVERT_TONE_STANDARD]
     = { 0.009f, 0.044f, 0.082f, 0.127f, 0.179f, 0.239f, 0.307f, 0.382f, 0.461f,
         0.542f, 0.623f, 0.702f, 0.777f, 0.845f, 0.908f, 0.965f, 1.018f },
   [DT_NEGCONVERT_TONE_CINEMATIC]
@@ -391,7 +391,7 @@ static const float _base_curves[TONE_BASES][TONE_KNOTS] = {
 };
 
 // curves on top of a base profile, of its display-encoded output
-static const float _tone_curves[TONE_CURVES][TONE_KNOTS] = {
+static const float _look_curves[LOOK_CURVES][TONE_KNOTS] = {
   [DT_NEGCONVERT_CURVE_SOFT]
     = { 0.042f, 0.104f, 0.167f, 0.228f, 0.287f, 0.344f, 0.397f, 0.448f, 0.499f,
         0.549f, 0.601f, 0.655f, 0.712f, 0.771f, 0.834f, 0.898f, 0.961f },
@@ -424,9 +424,9 @@ static const float _tone_curves[TONE_CURVES][TONE_KNOTS] = {
         0.578f, 0.644f, 0.707f, 0.767f, 0.825f, 0.882f, 0.938f, 0.996f }
 };
 
-static inline gboolean _is_lab_profile(const dt_iop_negconvert_tone_t profile)
+static inline gboolean _has_auto_density(const dt_iop_negconvert_tone_t profile)
 {
-  return profile == DT_NEGCONVERT_TONE_LAB;
+  return profile == DT_NEGCONVERT_TONE_STANDARD;
 }
 
 // slope at a knot from its neighboring secants: the harmonic mean keeps the cubic monotone
@@ -460,21 +460,21 @@ static inline float _table_curve(const float *const k, const float v)
          + (-2.0f * t3 + 3.0f * t2) * k[i + 1] + (t3 - t2) * h * _knot_slope(k, i + 1);
 }
 
-// lab_density is the lab profiles' brightness correction, a gamma on the midtones that keeps black and white
-// in place: on the synthetic wedge that form fits nlp to an rms of 0.002, where a black lift or a density
-// offset leave 0.01
+// auto_density is the standard profile's brightness correction (in nlp, the lab profiles'), a gamma on the
+// midtones that keeps black and white in place: on the synthetic wedge that form fits nlp to an rms of 0.002,
+// where a black lift or a density offset leave 0.01
 static inline float _tone(const float x, const dt_iop_negconvert_tone_t profile,
-                          const dt_iop_negconvert_curve_t curve, const float lab_density)
+                          const dt_iop_negconvert_curve_t curve, const float auto_density)
 {
   float y = x;
   if(profile != DT_NEGCONVERT_TONE_LINEAR)
   {
     y = _nlp_linear(x);
-    if(_is_lab_profile(profile)) y = powf(y, expf(-lab_density));
-    if(profile == DT_NEGCONVERT_TONE_LAB || profile == DT_NEGCONVERT_TONE_CINEMATIC)
+    if(_has_auto_density(profile)) y = powf(y, expf(-auto_density));
+    if(profile == DT_NEGCONVERT_TONE_STANDARD || profile == DT_NEGCONVERT_TONE_CINEMATIC)
       y = _table_curve(_base_curves[profile], y);
   }
-  if(curve != DT_NEGCONVERT_CURVE_STANDARD) y = _table_curve(_tone_curves[MIN(curve, TONE_CURVES - 1)], y);
+  if(curve != DT_NEGCONVERT_CURVE_NONE) y = _table_curve(_look_curves[MIN(curve, LOOK_CURVES - 1)], y);
   return y;
 }
 
@@ -502,7 +502,7 @@ static void _process_pixel(const dt_iop_negconvert_data_t *const d, const float 
     const float density = log10f(d->base[c] / fmaxf(in[c], THRESHOLD));
     float x = (density - d->black_density[c]) * d->inv_range[c];
     if(p->color_density == DT_NEGCONVERT_ADD_DENSITY) x += d->density_shift[c];
-    y[c] = _tone(x, p->tone_profile, p->tone_curve, p->lab_density);
+    y[c] = _tone(x, p->tone_profile, p->look_curve, p->auto_density);
     if(p->color_density == DT_NEGCONVERT_NEUTRAL_DENSITY) y[c] *= d->gain[c];
   }
 
@@ -740,7 +740,7 @@ static void _set_balance(dt_iop_module_t *self, const float x[3])
   {
     // gains are exp(t, -n, -t): make gain * tone(x) equal in the three channels
     float ly[3];
-    for(int c = 0; c < 3; c++) ly[c] = logf(fmaxf(_tone(x[c], p->tone_profile, p->tone_curve, p->lab_density), THRESHOLD));
+    for(int c = 0; c < 3; c++) ly[c] = logf(fmaxf(_tone(x[c], p->tone_profile, p->look_curve, p->auto_density), THRESHOLD));
     temp = 0.5f * (ly[2] - ly[0]);
     tint = ly[1] - 0.5f * (ly[0] + ly[2]);
   }
@@ -840,12 +840,12 @@ static void _apply_analysis(dt_iop_module_t *self)
   float x[3], u[3];
   _unbalanced_density(self, median, x);
   for(int c = 0; c < 3; c++) u[c] = _nlp_linear(x[c]);
-  p->lab_density = -CLAMP(1.615f * (_luma(u) - 0.543f), -0.237f, 0.069f);
+  p->auto_density = -CLAMP(1.615f * (_luma(u) - 0.543f), -0.237f, 0.069f);
 
   DT_ENTER_GUI_UPDATE();
   _set_triplet(g->black_density, p->black_density);
   _set_triplet(g->white_density, p->white_density);
-  dt_bauhaus_slider_set(g->lab_density, p->lab_density);
+  dt_bauhaus_slider_set(g->auto_density, p->auto_density);
   DT_LEAVE_GUI_UPDATE();
 
   dt_dev_add_history_item(darktable.develop, self, TRUE);
@@ -1027,16 +1027,17 @@ void gui_init(dt_iop_module_t *self)
                                    "neutral density: temp and tint scale the result, keeping luminance"));
   w = dt_bauhaus_combobox_from_params(self, "tone_profile");
   gtk_widget_set_tooltip_text(w, _("base response applied to the normalized density, after negative lab pro's "
-                                   "profiles of the same names.\n"
-                                   "lab: bold contrast like a lab scanner, with a brightness correction "
-                                   "that analyze sets from the picked area (lab density)\n"
+                                   "profiles.\n"
+                                   "standard: bold contrast like a lab scanner, with a brightness correction "
+                                   "that analyze sets from the picked area (auto density). "
+                                   "negative lab pro calls it lab\n"
                                    "cinematic: a logarithmic response with smooth mids and shadows "
                                    "and detail kept in the highlights (negative lab pro's cinematic log)\n"
                                    "neutral: a plain response, for flat results to grade later "
                                    "(negative lab pro calls it linear)\n"
                                    "linear: the normalized density as it is, with no curve; "
                                    "the only profile that goes below black, where shadow rolloff applies"));
-  w = dt_bauhaus_combobox_from_params(self, "tone_curve");
+  w = dt_bauhaus_combobox_from_params(self, "look_curve");
   gtk_widget_set_tooltip_text(w, _("fixed curve on top of the tone profile. "
                                    "negative lab pro pairs them as lab soft, hard, highlight and shadow soft and hard; "
                                    "neutral gamma, flat and deep; cinematic rich and flat, "
@@ -1047,9 +1048,9 @@ void gui_init(dt_iop_module_t *self)
                                    "flat: lifts black and lowers white\n"
                                    "deep: a touch darker\n"
                                    "rich: deeper shadows and brighter highlights"));
-  g->lab_density = dt_bauhaus_slider_from_params(self, "lab_density");
-  dt_bauhaus_slider_set_digits(g->lab_density, 3);
-  gtk_widget_set_tooltip_text(g->lab_density, _("brightness correction of the lab tone profiles: positive values "
+  g->auto_density = dt_bauhaus_slider_from_params(self, "auto_density");
+  dt_bauhaus_slider_set_digits(g->auto_density, 3);
+  gtk_widget_set_tooltip_text(g->auto_density, _("brightness correction of the standard tone profile: positive values "
                                                 "brighten the midtones, negative values darken them, "
                                                 "black and white stay in place.\n"
                                                 "analyze sets it from the brightness of the picked area, "
@@ -1255,7 +1256,7 @@ static void _update_profile_sensitivity(dt_iop_module_t *self)
 {
   dt_iop_negconvert_gui_data_t *g = self->gui_data;
   const dt_iop_negconvert_params_t *p = self->params;
-  gtk_widget_set_visible(g->lab_density, _is_lab_profile(p->tone_profile));
+  gtk_widget_set_visible(g->auto_density, _has_auto_density(p->tone_profile));
   gtk_widget_set_sensitive(g->shadow_rolloff, p->tone_profile == DT_NEGCONVERT_TONE_LINEAR);
 }
 
