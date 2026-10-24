@@ -52,6 +52,33 @@
  * profile on the same frames; the remaining tone/color constants are this
  * module's own choices. Nothing here is a calibrated film model.
  *
+ * Processing order. Each step sees the result of the ones before it, so a control
+ * placed earlier changes what every later control works on:
+ *
+ *   1. density range (commit_params): the black and white densities, shared or
+ *      per channel as the color method says, then moved inward by black and
+ *      white clip, then squeezed about their middle by contrast
+ *   2. normalized density x of each channel, from the film base and that range
+ *   3. temp and tint, in the color density mode: midtone density bends each
+ *      channel's midtones, add density shifts x
+ *   4. tone profile, auto density (standard only) and look curve; from here on
+ *      values are display-encoded, 0 black and 1 white
+ *   5. temp and tint in neutral density mode, as gains
+ *   6. black and white film: the channels are merged into one
+ *   7. shadows, midtones and highlights color balance (split toning)
+ *   8. blacks, darks, lights and whites
+ *   9. saturation
+ *  10. look (contrast, saturation and a warm or cool shift), then toning
+ *  11. lab fade and lab glow
+ *  12. shadow rolloff
+ *  13. highlight fade (color protected only): channels past white fade to neutral
+ *  14. highlight rolloff
+ *  15. clip at white, keeping hue (color protected) or per channel
+ *  16. conversion to linear for the rest of the pipeline
+ *
+ * So white clip and contrast move pixels into or out of the highlight fade and
+ * rolloff, while the tone sliders and looks act on the converted positive.
+ *
  * This is deliberately a different module from negadoctor, which implements a
  * Cineon-style physical model. Use negadoctor when you want that.
  *
