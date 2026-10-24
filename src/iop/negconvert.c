@@ -190,6 +190,7 @@ typedef struct dt_iop_negconvert_gui_data_t
   GtkWidget *base[3], *black_density[3], *white_density[3];
   GtkWidget *base_picker, *wb_picker, *analyze_picker;
   GtkWidget *analyze_black, *analyze_white;
+  dt_gui_collapsible_section_t density_section;
   GtkWidget *temp, *tint;
   GtkWidget *auto_wb;
   // filled by the preview pipe, read by the gui thread, both under the module lock
@@ -839,9 +840,20 @@ void gui_init(dt_iop_module_t *self)
                                                    "most of the color cast.\n"
                                                    "pick the image content and leave out the film border, sprocket "
                                                    "holes and holder.\n"
+                                                   "this sets the black and white density sliders automatically, "
+                                                   "so they should usually not be modified by hand.\n"
                                                    "the film base does not need to be set for this"));
   dt_action_define_iop(self, N_("pickers"), N_("density range"), g->analyze_picker, &dt_action_def_color_picker);
   dt_gui_box_add(page, dt_ui_section_label_new(C_("section", "analyze")), g->analyze_picker);
+
+  dt_gui_box_add(page, dt_ui_section_label_new(C_("section", "film base")), g->base_picker);
+  _triplet_slider(self, (const char *[]){ "base[0]", "base[1]", "base[2]" }, g->base,
+                  (const char *[]){ N_("film base red"), N_("film base green"), N_("film base blue") },
+                  _("transmittance of the unexposed film, as seen by the scanner or camera"));
+
+  dt_gui_new_collapsible_section(&g->density_section, "plugins/darkroom/negconvert/expand_density_range",
+                                 _("density range"), GTK_BOX(page), DT_ACTION(self));
+  self->widget = GTK_WIDGET(g->density_section.container);
 
   g->analyze_black = dt_bauhaus_slider_from_params(self, "analyze_black");
   GtkWidget *w = g->analyze_black;
@@ -857,12 +869,6 @@ void gui_init(dt_iop_module_t *self)
                                    "lets clip to white.\n"
                                    "raise it to ignore dust and specular highlights"));
 
-  dt_gui_box_add(page, dt_ui_section_label_new(C_("section", "film base")), g->base_picker);
-  _triplet_slider(self, (const char *[]){ "base[0]", "base[1]", "base[2]" }, g->base,
-                  (const char *[]){ N_("film base red"), N_("film base green"), N_("film base blue") },
-                  _("transmittance of the unexposed film, as seen by the scanner or camera"));
-
-  dt_gui_box_add(page, dt_ui_section_label_new(C_("section", "density range")));
   _triplet_slider(self, (const char *[]){ "black_density[0]", "black_density[1]", "black_density[2]" },
                   g->black_density,
                   (const char *[]){ N_("black density red"), N_("black density green"), N_("black density blue") },
@@ -871,6 +877,7 @@ void gui_init(dt_iop_module_t *self)
                   g->white_density,
                   (const char *[]){ N_("white density red"), N_("white density green"), N_("white density blue") },
                   _("density of the negative that becomes white"));
+  self->widget = page;
 
   dt_gui_box_add(page, dt_ui_section_label_new(C_("section", "conversion")));
   w = dt_bauhaus_combobox_from_params(self, "film_type");
@@ -897,12 +904,6 @@ void gui_init(dt_iop_module_t *self)
 
   // page TONE
   page = self->widget = dt_ui_notebook_page(g->notebook, N_("tone"), NULL);
-  w = dt_bauhaus_slider_from_params(self, "contrast");
-  gtk_widget_set_tooltip_text(w, _("steepen or flatten the inversion curve about the middle of the density range.\n"
-                                   "unlike the looks, this changes the conversion itself: it scales the density "
-                                   "range before the tone profile, so everything after it responds to the new "
-                                   "gradient. at +100 the gradient is doubled and the outer quarter of the range "
-                                   "is pushed past black and white; at -100 it is halved"));
   g->wb_picker = dt_color_picker_new(self, DT_COLOR_PICKER_AREA, NULL);
   gtk_widget_set_tooltip_text(g->wb_picker, _("pick an area that should be neutral gray in the positive, "
                                               "such as a gray card, a white shirt or a concrete wall.\n"
@@ -935,6 +936,12 @@ void gui_init(dt_iop_module_t *self)
                                    "shifts the color balance along the green/magenta axis\n"
                                    "positive values add magenta, negative values add green"));
   dt_gui_box_add(page, dt_ui_section_label_new(C_("section", "tone")));
+  w = dt_bauhaus_slider_from_params(self, "contrast");
+  gtk_widget_set_tooltip_text(w, _("steepen or flatten the inversion curve about the middle of the density range.\n"
+                                   "unlike the looks, this changes the conversion itself: it scales the density "
+                                   "range before the tone profile, so everything after it responds to the new "
+                                   "gradient. at +100 the gradient is doubled and the outer quarter of the range "
+                                   "is pushed past black and white; at -100 it is halved"));
   w = dt_bauhaus_slider_from_params(self, "whites");
   gtk_widget_set_tooltip_text(w, _(
                                    "brightness of the brightest tones\n"

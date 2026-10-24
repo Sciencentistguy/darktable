@@ -4545,6 +4545,13 @@
     <longdescription>height of agx graph in per cent</longdescription>
   </dtconfig>
   <dtconfig>
+    <name>plugins/darkroom/negconvert/expand_density_range</name>
+    <type>bool</type>
+    <default>false</default>
+    <shortdescription>whether to show the density range of negative convert</shortdescription>
+    <longdescription>this is just to store whether to show the density range sliders or not</longdescription>
+  </dtconfig>
+  <dtconfig>
     <name>plugins/darkroom/agx/expand_curve_advanced</name>
     <type>bool</type>
     <default>false</default>
