@@ -76,6 +76,8 @@
 
 // temp and tint are a density offset (add density) or the log of a gain (neutral density), per slider unit
 #define BALANCE_SCALE 0.01f
+// log-odds per unit of density shift, for midtone density: +-100 moves middle gray to 0.12 or 0.88
+#define MIDTONE_ODDS 2.0f
 
 // analysis histogram of log2(transmittance), 16 bins per EV over -32..0 EV
 #define ANALYSIS_BINS 512
@@ -98,8 +100,9 @@ typedef enum dt_iop_negconvert_color_method_t
 
 typedef enum dt_iop_negconvert_density_t
 {
-  DT_NEGCONVERT_ADD_DENSITY = 0,    // $DESCRIPTION: "add density"
-  DT_NEGCONVERT_NEUTRAL_DENSITY = 1 // $DESCRIPTION: "neutral density"
+  DT_NEGCONVERT_MIDTONE_DENSITY = 0, // $DESCRIPTION: "midtone density"
+  DT_NEGCONVERT_ADD_DENSITY = 1,     // $DESCRIPTION: "add density"
+  DT_NEGCONVERT_NEUTRAL_DENSITY = 2  // $DESCRIPTION: "neutral density"
 } dt_iop_negconvert_density_t;
 
 typedef enum dt_iop_negconvert_tone_t
@@ -158,7 +161,7 @@ typedef struct dt_iop_negconvert_params_t
   float black_density[4];                        // $MIN: -1.0 $MAX: 4.0 $DEFAULT: 0.0 $DESCRIPTION: "black density"
   float white_density[4];                        // $MIN: 0.05 $MAX: 5.0 $DEFAULT: 1.5 $DESCRIPTION: "white density"
   dt_iop_negconvert_color_method_t color_method; // $DEFAULT: DT_NEGCONVERT_SHADOW_WEIGHTED $DESCRIPTION: "color method"
-  dt_iop_negconvert_density_t color_density;     // $DEFAULT: DT_NEGCONVERT_ADD_DENSITY $DESCRIPTION: "color density"
+  dt_iop_negconvert_density_t color_density;     // $DEFAULT: DT_NEGCONVERT_MIDTONE_DENSITY $DESCRIPTION: "color density"
   dt_iop_negconvert_tone_t tone_profile;         // $DEFAULT: DT_NEGCONVERT_TONE_LINEAR $DESCRIPTION: "tone profile"
   dt_iop_negconvert_curve_t look_curve;          // $DEFAULT: DT_NEGCONVERT_CURVE_NONE $DESCRIPTION: "look curve"
   float temp;                                    // $MIN: -100.0 $MAX: 100.0 $DEFAULT: 0.0 $DESCRIPTION: "temp"
@@ -200,6 +203,7 @@ typedef struct dt_iop_negconvert_data_t
   dt_aligned_pixel_t black_density;
   dt_aligned_pixel_t inv_range;
   dt_aligned_pixel_t density_shift; // temp/tint as a density offset (add density)
+  dt_aligned_pixel_t midtone_odds;  // temp/tint as a factor on the odds of the density (midtone density)
   dt_aligned_pixel_t gain;          // temp/tint as luminance-preserving gains (neutral density)
   dt_iop_negconvert_params_t p;
 } dt_iop_negconvert_data_t;
@@ -351,6 +355,8 @@ void commit_params(dt_iop_module_t *self, dt_iop_params_t *p1, dt_dev_pixelpipe_
   d->density_shift[1] = -tint + offset;
   d->density_shift[2] = -temp + offset;
   d->density_shift[3] = 0.0f;
+  for(int c = 0; c < 3; c++) d->midtone_odds[c] = expf(MIDTONE_ODDS * d->density_shift[c]);
+  d->midtone_odds[3] = 1.0f;
 
   // exponential, so the gains stay positive over the whole slider range
   const float gain_r = expf(temp);
@@ -490,6 +496,16 @@ static inline float _luma(const float *const rgb)
   return 0.2126f * rgb[0] + 0.7152f * rgb[1] + 0.0722f * rgb[2];
 }
 
+// moves the midtones of a normalized density by multiplying its odds x / (1 - x), keeping 0 and 1 in place.
+// the per channel density range already balances black and white, so a density shift would unbalance them
+// again: it left the highlights gray and tinted. beyond 0 and 1 the balance does nothing: continuing along
+// the end slopes, which differ per channel, tinted neutral highlights beyond white against the balance
+static inline float _shift_odds(const float x, const float odds)
+{
+  if(x <= 0.0f || x >= 1.0f) return x;
+  return odds * x / (1.0f + (odds - 1.0f) * x);
+}
+
 static void _process_pixel(const dt_iop_negconvert_data_t *const d, const float *const in, float *const out)
 {
   const dt_iop_negconvert_params_t *const p = &d->p;
@@ -499,7 +515,10 @@ static void _process_pixel(const dt_iop_negconvert_data_t *const d, const float 
   {
     const float density = log10f(d->base[c] / fmaxf(in[c], THRESHOLD));
     float x = (density - d->black_density[c]) * d->inv_range[c];
-    if(p->color_density == DT_NEGCONVERT_ADD_DENSITY) x += d->density_shift[c];
+    if(p->color_density == DT_NEGCONVERT_MIDTONE_DENSITY)
+      x = _shift_odds(x, d->midtone_odds[c]);
+    else if(p->color_density == DT_NEGCONVERT_ADD_DENSITY)
+      x += d->density_shift[c];
     y[c] = _tone(x, p->tone_profile, p->look_curve, p->auto_density);
     if(p->color_density == DT_NEGCONVERT_NEUTRAL_DENSITY) y[c] *= d->gain[c];
   }
@@ -796,7 +815,19 @@ static void _set_balance(dt_iop_module_t *self, const float x[3])
   dt_iop_negconvert_params_t *p = self->params;
 
   float temp, tint;
-  if(p->color_density == DT_NEGCONVERT_ADD_DENSITY)
+  if(p->color_density == DT_NEGCONVERT_MIDTONE_DENSITY)
+  {
+    // log-odds shifts of (t, -n, -t), as for add density
+    float lx[3];
+    for(int c = 0; c < 3; c++)
+    {
+      const float v = CLAMP(x[c], 0.001f, 0.999f);
+      lx[c] = logf(v / (1.0f - v)) / MIDTONE_ODDS;
+    }
+    temp = 0.5f * (lx[2] - lx[0]);
+    tint = lx[1] - 0.5f * (lx[0] + lx[2]);
+  }
+  else if(p->color_density == DT_NEGCONVERT_ADD_DENSITY)
   {
     // shifts are (t, -n, -t) added to x: the three channels can be matched exactly
     const float t = 0.5f * (x[2] - x[0]);
@@ -1032,8 +1063,14 @@ void gui_init(dt_iop_module_t *self)
                                    "shadow weighted: stretch the white point per channel, "
                                    "share the black point"));
   w = dt_bauhaus_combobox_from_params(self, "color_density");
-  gtk_widget_set_tooltip_text(w, _("add density: temp and tint shift the density before the tone profile\n"
-                                   "neutral density: temp and tint scale the result, keeping luminance"));
+  gtk_widget_set_tooltip_text(w, _("how temp and tint change the channels.\n"
+                                   "midtone density: move the midtones of each channel, keeping its black and white "
+                                   "points, which the density range has already balanced. "
+                                   "best with linear dynamic and shadow weighted\n"
+                                   "add density: shift the density of each channel before the tone profile, "
+                                   "like filtration under an enlarger. it corrects a cast at every tone "
+                                   "but moves the black and white points, so it suits linear fixed\n"
+                                   "neutral density: scale the result, keeping luminance"));
   w = dt_bauhaus_combobox_from_params(self, "tone_profile");
   gtk_widget_set_tooltip_text(w, _("base response applied to the normalized density. "
                                    "all but linear follow negative lab pro's profiles.\n"
