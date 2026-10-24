@@ -46,8 +46,10 @@
  *   x = (D - D_black) / (D_white - D_black)
  *
  * x is then mapped through a tone profile, adjusted by the tone and color
- * controls, and finished with a look. All of the tone/color constants below are
- * this module's own choices; nothing here is a calibrated film model.
+ * controls, and finished with a look. The tone profile curves were measured from
+ * Negative Lab Pro's output for each of its profiles, taken against its linear
+ * profile on the same frames; the remaining tone/color constants are this
+ * module's own choices. Nothing here is a calibrated film model.
  *
  * This is deliberately a different module from negadoctor, which implements a
  * Cineon-style physical model. Use negadoctor when you want that.
@@ -101,11 +103,24 @@ typedef enum dt_iop_negconvert_density_t
 
 typedef enum dt_iop_negconvert_tone_t
 {
-  DT_NEGCONVERT_TONE_STANDARD = 0,     // $DESCRIPTION: "standard"
-  DT_NEGCONVERT_TONE_LINEAR = 1,       // $DESCRIPTION: "linear"
-  DT_NEGCONVERT_TONE_LINEAR_GAMMA = 2, // $DESCRIPTION: "linear gamma"
-  DT_NEGCONVERT_TONE_LOGARITHMIC = 3   // $DESCRIPTION: "logarithmic"
+  DT_NEGCONVERT_TONE_LAB_STANDARD = 0,        // $DESCRIPTION: "lab standard"
+  DT_NEGCONVERT_TONE_LAB_SOFT = 1,            // $DESCRIPTION: "lab soft"
+  DT_NEGCONVERT_TONE_LAB_HARD = 2,            // $DESCRIPTION: "lab hard"
+  DT_NEGCONVERT_TONE_LAB_HIGHLIGHT_SOFT = 3,  // $DESCRIPTION: "lab highlight soft"
+  DT_NEGCONVERT_TONE_LAB_HIGHLIGHT_HARD = 4,  // $DESCRIPTION: "lab highlight hard"
+  DT_NEGCONVERT_TONE_LAB_SHADOW_SOFT = 5,     // $DESCRIPTION: "lab shadow soft"
+  DT_NEGCONVERT_TONE_LAB_SHADOW_HARD = 6,     // $DESCRIPTION: "lab shadow hard"
+  DT_NEGCONVERT_TONE_LINEAR = 7,              // $DESCRIPTION: "linear"
+  DT_NEGCONVERT_TONE_LINEAR_GAMMA = 8,        // $DESCRIPTION: "linear gamma"
+  DT_NEGCONVERT_TONE_LINEAR_FLAT = 9,         // $DESCRIPTION: "linear flat"
+  DT_NEGCONVERT_TONE_LINEAR_DEEP = 10,        // $DESCRIPTION: "linear deep"
+  DT_NEGCONVERT_TONE_CINEMATIC_RICH = 11,     // $DESCRIPTION: "cinematic rich"
+  DT_NEGCONVERT_TONE_CINEMATIC_FLAT = 12,     // $DESCRIPTION: "cinematic flat"
+  DT_NEGCONVERT_TONE_CINEMATIC_LOG = 13       // $DESCRIPTION: "cinematic log"
 } dt_iop_negconvert_tone_t;
+
+#define TONE_PROFILES 14
+#define TONE_KNOTS 17
 
 typedef enum dt_iop_negconvert_look_t
 {
@@ -135,7 +150,7 @@ typedef struct dt_iop_negconvert_params_t
   float white_density[4];                        // $MIN: 0.05 $MAX: 5.0 $DEFAULT: 1.5 $DESCRIPTION: "white density"
   dt_iop_negconvert_color_method_t color_method; // $DEFAULT: DT_NEGCONVERT_SHADOW_WEIGHTED $DESCRIPTION: "color method"
   dt_iop_negconvert_density_t color_density;     // $DEFAULT: DT_NEGCONVERT_ADD_DENSITY $DESCRIPTION: "color density"
-  dt_iop_negconvert_tone_t tone_profile;         // $DEFAULT: DT_NEGCONVERT_TONE_STANDARD $DESCRIPTION: "tone profile"
+  dt_iop_negconvert_tone_t tone_profile;         // $DEFAULT: DT_NEGCONVERT_TONE_LAB_STANDARD $DESCRIPTION: "tone profile"
   float temp;                                    // $MIN: -100.0 $MAX: 100.0 $DEFAULT: 0.0 $DESCRIPTION: "temp"
   float tint;                                    // $MIN: -100.0 $MAX: 100.0 $DEFAULT: 0.0 $DESCRIPTION: "tint"
   float whites;                                  // $MIN: -100.0 $MAX: 100.0 $DEFAULT: 0.0 $DESCRIPTION: "whites"
@@ -166,6 +181,7 @@ typedef struct dt_iop_negconvert_params_t
   float analyze_black;                           // $MIN: 0.01 $MAX: 20.0 $DEFAULT: 1.0 $DESCRIPTION: "black percentile"
   float analyze_white;                           // $MIN: 0.01 $MAX: 20.0 $DEFAULT: 1.0 $DESCRIPTION: "white percentile"
   float contrast;                                // $MIN: -100.0 $MAX: 100.0 $DEFAULT: 0.0 $DESCRIPTION: "contrast"
+  float lab_density;                             // $MIN: -0.25 $MAX: 0.25 $DEFAULT: 0.0 $DESCRIPTION: "lab density"
 } dt_iop_negconvert_params_t;
 
 typedef struct dt_iop_negconvert_data_t
@@ -191,7 +207,7 @@ typedef struct dt_iop_negconvert_gui_data_t
   GtkWidget *base_picker, *wb_picker, *analyze_picker;
   GtkWidget *analyze_black, *analyze_white;
   dt_gui_collapsible_section_t density_section;
-  GtkWidget *temp, *tint;
+  GtkWidget *temp, *tint, *lab_density;
   GtkWidget *auto_wb;
   // filled by the preview pipe, read by the gui thread, both under the module lock
   uint32_t analysis[3][ANALYSIS_BINS];
@@ -353,27 +369,81 @@ static inline float _bump(const float x, const float c, const float w)
   return fmaxf(0.0f, 1.0f - fabsf(x - c) / w);
 }
 
-static inline float _tone(const float x, const dt_iop_negconvert_tone_t profile)
+// display-encoded output of each profile at x = 0, 1/16, ... 1, the median of negative lab pro's
+// output for that profile against its linear profile over the same pixels
+static const float _tone_curves[TONE_PROFILES][TONE_KNOTS] = {
+  [DT_NEGCONVERT_TONE_LAB_STANDARD]
+    = { 0.020f, 0.042f, 0.086f, 0.143f, 0.208f, 0.276f, 0.347f, 0.418f, 0.489f,
+        0.561f, 0.634f, 0.707f, 0.779f, 0.848f, 0.910f, 0.961f, 0.993f },
+  [DT_NEGCONVERT_TONE_LAB_SOFT]
+    = { 0.064f, 0.083f, 0.127f, 0.185f, 0.248f, 0.312f, 0.373f, 0.432f, 0.490f,
+        0.548f, 0.609f, 0.672f, 0.739f, 0.806f, 0.869f, 0.921f, 0.948f },
+  [DT_NEGCONVERT_TONE_LAB_HARD]
+    = { 0.012f, 0.026f, 0.050f, 0.089f, 0.143f, 0.212f, 0.294f, 0.387f, 0.485f,
+        0.585f, 0.681f, 0.769f, 0.845f, 0.905f, 0.948f, 0.973f, 0.984f },
+  [DT_NEGCONVERT_TONE_LAB_HIGHLIGHT_SOFT]
+    = { 0.029f, 0.047f, 0.090f, 0.146f, 0.208f, 0.271f, 0.334f, 0.396f, 0.458f,
+        0.521f, 0.587f, 0.656f, 0.728f, 0.800f, 0.866f, 0.919f, 0.948f },
+  [DT_NEGCONVERT_TONE_LAB_HIGHLIGHT_HARD]
+    = { 0.026f, 0.045f, 0.087f, 0.145f, 0.213f, 0.286f, 0.361f, 0.438f, 0.514f,
+        0.590f, 0.665f, 0.737f, 0.806f, 0.869f, 0.923f, 0.963f, 0.981f },
+  [DT_NEGCONVERT_TONE_LAB_SHADOW_SOFT]
+    = { 0.061f, 0.081f, 0.128f, 0.189f, 0.257f, 0.326f, 0.393f, 0.458f, 0.521f,
+        0.584f, 0.647f, 0.713f, 0.780f, 0.846f, 0.907f, 0.955f, 0.979f },
+  [DT_NEGCONVERT_TONE_LAB_SHADOW_HARD]
+    = { 0.023f, 0.038f, 0.074f, 0.123f, 0.181f, 0.245f, 0.314f, 0.386f, 0.461f,
+        0.538f, 0.616f, 0.695f, 0.772f, 0.844f, 0.907f, 0.955f, 0.980f },
+  [DT_NEGCONVERT_TONE_LINEAR]
+    = { 0.000f, 0.062f, 0.125f, 0.188f, 0.250f, 0.312f, 0.375f, 0.438f, 0.500f,
+        0.562f, 0.625f, 0.688f, 0.750f, 0.812f, 0.875f, 0.938f, 1.000f },
+  [DT_NEGCONVERT_TONE_LINEAR_GAMMA]
+    = { 0.003f, 0.017f, 0.044f, 0.081f, 0.126f, 0.176f, 0.230f, 0.290f, 0.354f,
+        0.423f, 0.496f, 0.574f, 0.657f, 0.743f, 0.829f, 0.914f, 0.993f },
+  [DT_NEGCONVERT_TONE_LINEAR_FLAT]
+    = { 0.041f, 0.094f, 0.147f, 0.200f, 0.254f, 0.309f, 0.365f, 0.421f, 0.477f,
+        0.532f, 0.587f, 0.640f, 0.693f, 0.745f, 0.799f, 0.857f, 0.920f },
+  [DT_NEGCONVERT_TONE_LINEAR_DEEP]
+    = { 0.004f, 0.050f, 0.101f, 0.156f, 0.215f, 0.276f, 0.339f, 0.404f, 0.470f,
+        0.538f, 0.607f, 0.676f, 0.745f, 0.813f, 0.879f, 0.940f, 0.994f },
+  [DT_NEGCONVERT_TONE_CINEMATIC_RICH]
+    = { 0.006f, 0.025f, 0.058f, 0.099f, 0.147f, 0.199f, 0.254f, 0.313f, 0.375f,
+        0.440f, 0.508f, 0.580f, 0.657f, 0.737f, 0.821f, 0.908f, 0.996f },
+  [DT_NEGCONVERT_TONE_CINEMATIC_FLAT]
+    = { 0.028f, 0.068f, 0.107f, 0.148f, 0.191f, 0.237f, 0.285f, 0.334f, 0.385f,
+        0.436f, 0.489f, 0.543f, 0.600f, 0.663f, 0.736f, 0.822f, 0.931f },
+  [DT_NEGCONVERT_TONE_CINEMATIC_LOG]
+    = { 0.008f, 0.041f, 0.084f, 0.133f, 0.183f, 0.233f, 0.283f, 0.333f, 0.384f,
+        0.439f, 0.498f, 0.564f, 0.638f, 0.720f, 0.808f, 0.901f, 0.994f }
+};
+
+static inline gboolean _is_lab_profile(const dt_iop_negconvert_tone_t profile)
 {
-  // density is already logarithmic, so the profiles only bend it gently. each keeps 0 and 1 in place and a
-  // finite slope at black, which would otherwise amplify the small channel differences there into color
-  const float xp = fmaxf(x, 0.0f);
-  switch(profile)
-  {
-    case DT_NEGCONVERT_TONE_LINEAR:
-      return x;
-    case DT_NEGCONVERT_TONE_LINEAR_GAMMA:
-    {
-      const float toe = 0.05f, g = 1.0f / 1.3f;
-      const float t0 = powf(toe, g);
-      return (powf(xp + toe, g) - t0) / (powf(1.0f + toe, g) - t0);
-    }
-    case DT_NEGCONVERT_TONE_LOGARITHMIC:
-      return log2f(1.0f + 2.0f * xp) / log2f(3.0f);
-    case DT_NEGCONVERT_TONE_STANDARD:
-    default:
-      return powf(xp, 1.15f);
-  }
+  return profile <= DT_NEGCONVERT_TONE_LAB_SHADOW_HARD;
+}
+
+// slope at a knot from its neighboring secants: the harmonic mean keeps the cubic monotone
+static inline float _knot_slope(const float *const k, const int i)
+{
+  const float h = 1.0f / (TONE_KNOTS - 1);
+  const float left = (i > 0) ? (k[i] - k[i - 1]) / h : (k[1] - k[0]) / h;
+  const float right = (i < TONE_KNOTS - 1) ? (k[i + 1] - k[i]) / h : left;
+  return (left * right > 0.0f) ? 2.0f * left * right / (left + right) : 0.0f;
+}
+
+// lab_density is the lab profiles' brightness correction: it lifts or lowers black and keeps white in place
+static inline float _tone(const float x, const dt_iop_negconvert_tone_t profile, const float lab_density)
+{
+  const float *const k = _tone_curves[MIN(profile, TONE_PROFILES - 1)];
+  const float xl = _is_lab_profile(profile) ? x + lab_density * (1.0f - x) : x;
+  // beyond the measured range the curve continues along its end slope, leaving the rolloffs something to work on
+  if(xl <= 0.0f) return k[0] + xl * _knot_slope(k, 0);
+  if(xl >= 1.0f) return k[TONE_KNOTS - 1] + (xl - 1.0f) * _knot_slope(k, TONE_KNOTS - 1);
+  const float pos = xl * (TONE_KNOTS - 1);
+  const int i = MIN((int)pos, TONE_KNOTS - 2);
+  const float t = pos - i, h = 1.0f / (TONE_KNOTS - 1);
+  const float t2 = t * t, t3 = t2 * t;
+  return (2.0f * t3 - 3.0f * t2 + 1.0f) * k[i] + (t3 - 2.0f * t2 + t) * h * _knot_slope(k, i)
+         + (-2.0f * t3 + 3.0f * t2) * k[i + 1] + (t3 - t2) * h * _knot_slope(k, i + 1);
 }
 
 // compresses values above the knee toward 1 without a corner at the knee: unit slope there, then
@@ -400,7 +470,7 @@ static void _process_pixel(const dt_iop_negconvert_data_t *const d, const float 
     const float density = log10f(d->base[c] / fmaxf(in[c], THRESHOLD));
     float x = (density - d->black_density[c]) * d->inv_range[c];
     if(p->color_density == DT_NEGCONVERT_ADD_DENSITY) x += d->density_shift[c];
-    y[c] = _tone(x, p->tone_profile);
+    y[c] = _tone(x, p->tone_profile, p->lab_density);
     if(p->color_density == DT_NEGCONVERT_NEUTRAL_DENSITY) y[c] *= d->gain[c];
   }
 
@@ -638,7 +708,7 @@ static void _set_balance(dt_iop_module_t *self, const float x[3])
   {
     // gains are exp(t, -n, -t): make gain * tone(x) equal in the three channels
     float ly[3];
-    for(int c = 0; c < 3; c++) ly[c] = logf(fmaxf(_tone(x[c], p->tone_profile), THRESHOLD));
+    for(int c = 0; c < 3; c++) ly[c] = logf(fmaxf(_tone(x[c], p->tone_profile, p->lab_density), THRESHOLD));
     temp = 0.5f * (ly[2] - ly[0]);
     tint = ly[1] - 0.5f * (ly[0] + ly[2]);
   }
@@ -720,6 +790,7 @@ static void _apply_analysis(dt_iop_module_t *self)
     dt_iop_gui_leave_critical_section(self);
     return;
   }
+  float median[3];
   for(int c = 0; c < 3; c++)
   {
     // thin negative (high transmittance) is black, dense (low transmittance) is white
@@ -727,12 +798,21 @@ static void _apply_analysis(dt_iop_module_t *self)
     const float t_white = _histogram_percentile(g->area_analysis[c], 0.01f * p->analyze_white);
     p->black_density[c] = log10f(p->base[c] / t_black);
     p->white_density[c] = log10f(p->base[c] / t_white);
+    median[c] = _histogram_percentile(g->area_analysis[c], 0.5f);
   }
   dt_iop_gui_leave_critical_section(self);
+
+  // negative lab pro's lab profiles pull an image's median brightness toward the middle, by up to 0.08.
+  // this fit of that correction against the median of its linear output (the x of this module) was
+  // measured over ten frames
+  float x[3];
+  _unbalanced_density(self, median, x);
+  p->lab_density = CLAMP(0.186f - 0.365f * _luma(x), -0.08f, 0.08f);
 
   DT_ENTER_GUI_UPDATE();
   _set_triplet(g->black_density, p->black_density);
   _set_triplet(g->white_density, p->white_density);
+  dt_bauhaus_slider_set(g->lab_density, p->lab_density);
   DT_LEAVE_GUI_UPDATE();
 
   dt_dev_add_history_item(darktable.develop, self, TRUE);
@@ -913,12 +993,23 @@ void gui_init(dt_iop_module_t *self)
   gtk_widget_set_tooltip_text(w, _("add density: temp and tint shift the density before the tone profile\n"
                                    "neutral density: temp and tint scale the result, keeping luminance"));
   w = dt_bauhaus_combobox_from_params(self, "tone_profile");
-  gtk_widget_set_tooltip_text(w, _(
-                                   "response curve applied to the normalized density\n"
-                                   "standard: slight contrast boost for a print-like look\n"
-                                   "linear: no curve, for flat results to grade later\n"
-                                   "linear gamma: brighter midtones\n"
-                                   "logarithmic: lifts shadows, compresses highlights"));
+  gtk_widget_set_tooltip_text(w, _("response curve applied to the normalized density, after negative lab pro's "
+                                   "profiles of the same names.\n"
+                                   "lab: bold contrast like a lab scanner, with a brightness correction "
+                                   "that analyze sets from the picked area (lab density)\n"
+                                   "linear: no curve, for flat results to grade later. "
+                                   "gamma is darker and richer, flat lifts black and lowers white, "
+                                   "deep is a touch darker\n"
+                                   "cinematic: a logarithmic response with smooth mids and shadows "
+                                   "and detail kept in the highlights"));
+  g->lab_density = dt_bauhaus_slider_from_params(self, "lab_density");
+  dt_bauhaus_slider_set_digits(g->lab_density, 3);
+  gtk_widget_set_tooltip_text(g->lab_density, _("brightness correction of the lab tone profiles: positive values "
+                                                "lift the shadows, negative values deepen them, "
+                                                "white stays in place.\n"
+                                                "analyze sets it from the brightness of the picked area, "
+                                                "pulling dark images up and bright ones down.\n"
+                                                "has no effect on the linear and cinematic profiles"));
 
   // page TONE
   page = self->widget = dt_ui_notebook_page(g->notebook, N_("tone"), NULL);
@@ -1113,18 +1204,27 @@ void gui_init(dt_iop_module_t *self)
   DT_CONTROL_SIGNAL_HANDLE(DT_SIGNAL_DEVELOP_PREVIEW_PIPE_FINISHED, _preview_pipe_finished_callback);
 }
 
+static void _update_lab_density_sensitivity(dt_iop_module_t *self)
+{
+  dt_iop_negconvert_gui_data_t *g = self->gui_data;
+  const dt_iop_negconvert_params_t *p = self->params;
+  gtk_widget_set_sensitive(g->lab_density, _is_lab_profile(p->tone_profile));
+}
+
 void gui_changed(dt_iop_module_t *self, GtkWidget *w, void *previous)
 {
   dt_iop_negconvert_gui_data_t *g = self->gui_data;
 
   // redo the analysis of the area already picked with the new percentiles
   if(w == g->analyze_black || w == g->analyze_white) _apply_analysis(self);
+  _update_lab_density_sensitivity(self);
 }
 
 void gui_update(dt_iop_module_t *const self)
 {
   dt_iop_negconvert_gui_data_t *g = self->gui_data;
   dt_gui_update_collapsible_section(&g->density_section);
+  _update_lab_density_sensitivity(self);
   dt_iop_color_picker_reset(self, TRUE);
 }
 
