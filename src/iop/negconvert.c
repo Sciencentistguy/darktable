@@ -181,7 +181,7 @@ typedef struct dt_iop_negconvert_params_t
   float analyze_black;                           // $MIN: 0.01 $MAX: 20.0 $DEFAULT: 1.0 $DESCRIPTION: "black percentile"
   float analyze_white;                           // $MIN: 0.01 $MAX: 20.0 $DEFAULT: 1.0 $DESCRIPTION: "white percentile"
   float contrast;                                // $MIN: -100.0 $MAX: 100.0 $DEFAULT: 0.0 $DESCRIPTION: "contrast"
-  float lab_density;                             // $MIN: -0.25 $MAX: 0.25 $DEFAULT: 0.0 $DESCRIPTION: "lab density"
+  float lab_density;                             // $MIN: -0.5 $MAX: 0.5 $DEFAULT: 0.0 $DESCRIPTION: "lab density"
 } dt_iop_negconvert_params_t;
 
 typedef struct dt_iop_negconvert_data_t
@@ -369,30 +369,30 @@ static inline float _bump(const float x, const float c, const float w)
   return fmaxf(0.0f, 1.0f - fabsf(x - c) / w);
 }
 
-// display-encoded output of each profile at x = 0, 1/16, ... 1, the median of negative lab pro's
-// output for that profile against its linear profile over the same pixels
+// display-encoded output of each profile at u = 0, 1/16, ... 1, u being the output of negative lab pro's
+// linear profile: the median of nlp's output for the profile against its linear output over the same pixels
 static const float _tone_curves[TONE_PROFILES][TONE_KNOTS] = {
   [DT_NEGCONVERT_TONE_LAB_STANDARD]
-    = { 0.020f, 0.042f, 0.086f, 0.143f, 0.208f, 0.276f, 0.347f, 0.418f, 0.489f,
-        0.561f, 0.634f, 0.707f, 0.779f, 0.848f, 0.910f, 0.961f, 0.993f },
+    = { 0.009f, 0.044f, 0.082f, 0.127f, 0.179f, 0.239f, 0.307f, 0.382f, 0.461f,
+        0.542f, 0.623f, 0.702f, 0.777f, 0.845f, 0.908f, 0.965f, 1.018f },
   [DT_NEGCONVERT_TONE_LAB_SOFT]
-    = { 0.064f, 0.083f, 0.127f, 0.185f, 0.248f, 0.312f, 0.373f, 0.432f, 0.490f,
-        0.548f, 0.609f, 0.672f, 0.739f, 0.806f, 0.869f, 0.921f, 0.948f },
+    = { 0.057f, 0.084f, 0.123f, 0.170f, 0.222f, 0.279f, 0.339f, 0.401f, 0.466f,
+        0.532f, 0.600f, 0.669f, 0.737f, 0.804f, 0.867f, 0.924f, 0.969f },
   [DT_NEGCONVERT_TONE_LAB_HARD]
-    = { 0.012f, 0.026f, 0.050f, 0.089f, 0.143f, 0.212f, 0.294f, 0.387f, 0.485f,
-        0.585f, 0.681f, 0.769f, 0.845f, 0.905f, 0.948f, 0.973f, 0.984f },
+    = { 0.004f, 0.031f, 0.049f, 0.073f, 0.113f, 0.171f, 0.249f, 0.344f, 0.449f,
+        0.558f, 0.665f, 0.761f, 0.842f, 0.904f, 0.947f, 0.974f, 0.995f },
   [DT_NEGCONVERT_TONE_LAB_HIGHLIGHT_SOFT]
-    = { 0.029f, 0.047f, 0.090f, 0.146f, 0.208f, 0.271f, 0.334f, 0.396f, 0.458f,
-        0.521f, 0.587f, 0.656f, 0.728f, 0.800f, 0.866f, 0.919f, 0.948f },
+    = { 0.021f, 0.049f, 0.086f, 0.130f, 0.181f, 0.237f, 0.298f, 0.363f, 0.432f,
+        0.504f, 0.577f, 0.652f, 0.726f, 0.798f, 0.864f, 0.922f, 0.969f },
   [DT_NEGCONVERT_TONE_LAB_HIGHLIGHT_HARD]
-    = { 0.026f, 0.045f, 0.087f, 0.145f, 0.213f, 0.286f, 0.361f, 0.438f, 0.514f,
-        0.590f, 0.665f, 0.737f, 0.806f, 0.869f, 0.923f, 0.963f, 0.981f },
+    = { 0.018f, 0.048f, 0.083f, 0.128f, 0.182f, 0.246f, 0.319f, 0.400f, 0.484f,
+        0.570f, 0.654f, 0.733f, 0.805f, 0.868f, 0.921f, 0.964f, 0.998f },
   [DT_NEGCONVERT_TONE_LAB_SHADOW_SOFT]
-    = { 0.061f, 0.081f, 0.128f, 0.189f, 0.257f, 0.326f, 0.393f, 0.458f, 0.521f,
-        0.584f, 0.647f, 0.713f, 0.780f, 0.846f, 0.907f, 0.955f, 0.979f },
+    = { 0.053f, 0.082f, 0.123f, 0.172f, 0.228f, 0.290f, 0.355f, 0.424f, 0.494f,
+        0.566f, 0.638f, 0.709f, 0.779f, 0.844f, 0.905f, 0.958f, 1.000f },
   [DT_NEGCONVERT_TONE_LAB_SHADOW_HARD]
-    = { 0.023f, 0.038f, 0.074f, 0.123f, 0.181f, 0.245f, 0.314f, 0.386f, 0.461f,
-        0.538f, 0.616f, 0.695f, 0.772f, 0.844f, 0.907f, 0.955f, 0.980f },
+    = { 0.015f, 0.041f, 0.071f, 0.107f, 0.153f, 0.210f, 0.276f, 0.350f, 0.432f,
+        0.517f, 0.604f, 0.689f, 0.769f, 0.842f, 0.906f, 0.958f, 0.999f },
   [DT_NEGCONVERT_TONE_LINEAR]
     = { 0.000f, 0.062f, 0.125f, 0.188f, 0.250f, 0.312f, 0.375f, 0.438f, 0.500f,
         0.562f, 0.625f, 0.688f, 0.750f, 0.812f, 0.875f, 0.938f, 1.000f },
@@ -430,11 +430,22 @@ static inline float _knot_slope(const float *const k, const int i)
   return (left * right > 0.0f) ? 2.0f * left * right / (left + right) : 0.0f;
 }
 
-// lab_density is the lab profiles' brightness correction: it lifts or lowers black and keeps white in place
+// display-encoded output of negative lab pro's linear profile: on a synthetic step wedge its linear light
+// output is the normalized density to the power 1.93, within 0.01
+static inline float _nlp_linear(const float x)
+{
+  const float v = powf(fmaxf(x, 0.0f), 1.93f);
+  return (v <= 0.0031308f) ? 12.92f * v : 1.055f * powf(v, 1.0f / 2.4f) - 0.055f;
+}
+
+// lab_density is the lab profiles' brightness correction, a gamma on the midtones that keeps black and white
+// in place: on the synthetic wedge that form fits nlp to an rms of 0.002, where a black lift or a density
+// offset leave 0.01
 static inline float _tone(const float x, const dt_iop_negconvert_tone_t profile, const float lab_density)
 {
   const float *const k = _tone_curves[MIN(profile, TONE_PROFILES - 1)];
-  const float xl = _is_lab_profile(profile) ? x + lab_density * (1.0f - x) : x;
+  const float u = _nlp_linear(x);
+  const float xl = _is_lab_profile(profile) ? powf(u, expf(-lab_density)) : u;
   // beyond the measured range the curve continues along its end slope, leaving the rolloffs something to work on
   if(xl <= 0.0f) return k[0] + xl * _knot_slope(k, 0);
   if(xl >= 1.0f) return k[TONE_KNOTS - 1] + (xl - 1.0f) * _knot_slope(k, TONE_KNOTS - 1);
@@ -802,12 +813,13 @@ static void _apply_analysis(dt_iop_module_t *self)
   }
   dt_iop_gui_leave_critical_section(self);
 
-  // negative lab pro's lab profiles pull an image's median brightness toward the middle, by up to 0.08.
-  // this fit of that correction against the median of its linear output (the x of this module) was
-  // measured over ten frames
-  float x[3];
+  // negative lab pro's lab profiles brighten dark images and slightly darken bright ones. this fit of the
+  // log of their midtone gamma against the median brightness of nlp's linear output was measured over ten
+  // photos and three synthetic wedges, to within 0.03
+  float x[3], u[3];
   _unbalanced_density(self, median, x);
-  p->lab_density = CLAMP(0.186f - 0.365f * _luma(x), -0.08f, 0.08f);
+  for(int c = 0; c < 3; c++) u[c] = _nlp_linear(x[c]);
+  p->lab_density = -CLAMP(1.615f * (_luma(u) - 0.543f), -0.237f, 0.069f);
 
   DT_ENTER_GUI_UPDATE();
   _set_triplet(g->black_density, p->black_density);
@@ -997,7 +1009,7 @@ void gui_init(dt_iop_module_t *self)
                                    "profiles of the same names.\n"
                                    "lab: bold contrast like a lab scanner, with a brightness correction "
                                    "that analyze sets from the picked area (lab density)\n"
-                                   "linear: no curve, for flat results to grade later. "
+                                   "linear: a plain response, for flat results to grade later. "
                                    "gamma is darker and richer, flat lifts black and lowers white, "
                                    "deep is a touch darker\n"
                                    "cinematic: a logarithmic response with smooth mids and shadows "
@@ -1005,8 +1017,8 @@ void gui_init(dt_iop_module_t *self)
   g->lab_density = dt_bauhaus_slider_from_params(self, "lab_density");
   dt_bauhaus_slider_set_digits(g->lab_density, 3);
   gtk_widget_set_tooltip_text(g->lab_density, _("brightness correction of the lab tone profiles: positive values "
-                                                "lift the shadows, negative values deepen them, "
-                                                "white stays in place.\n"
+                                                "brighten the midtones, negative values darken them, "
+                                                "black and white stay in place.\n"
                                                 "analyze sets it from the brightness of the picked area, "
                                                 "pulling dark images up and bright ones down.\n"
                                                 "has no effect on the linear and cinematic profiles"));
