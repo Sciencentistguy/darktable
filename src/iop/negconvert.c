@@ -1228,7 +1228,7 @@ static void _update_profile_sensitivity(dt_iop_module_t *self)
 {
   dt_iop_negconvert_gui_data_t *g = self->gui_data;
   const dt_iop_negconvert_params_t *p = self->params;
-  gtk_widget_set_sensitive(g->lab_density, _is_lab_profile(p->tone_profile));
+  gtk_widget_set_visible(g->lab_density, _is_lab_profile(p->tone_profile));
   gtk_widget_set_sensitive(g->shadow_rolloff, p->tone_profile == DT_NEGCONVERT_TONE_LINEAR);
 }
 
