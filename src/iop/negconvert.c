@@ -1135,8 +1135,8 @@ void gui_init(dt_iop_module_t *self)
                                                    "clipping them.\n"
                                                    "higher values start the rolloff earlier and recover more shadow "
                                                    "detail, at the cost of lifting the tones near black.\n"
-                                                   "0 clips hard. only the linear tone profile goes below black, "
-                                                   "so it has no effect on the others"));
+                                                   "0 clips hard. only shown with the linear tone profile, "
+                                                   "the only one that goes below black"));
   w = dt_bauhaus_combobox_from_params(self, "clip_method");
   gtk_widget_set_tooltip_text(w, _(
                                    "what happens to values above white after the adjustments and rolloff\n"
@@ -1258,7 +1258,7 @@ static void _update_profile_sensitivity(dt_iop_module_t *self)
   dt_iop_negconvert_gui_data_t *g = self->gui_data;
   const dt_iop_negconvert_params_t *p = self->params;
   gtk_widget_set_visible(g->auto_density, _has_auto_density(p->tone_profile));
-  gtk_widget_set_sensitive(g->shadow_rolloff, p->tone_profile == DT_NEGCONVERT_TONE_LINEAR);
+  gtk_widget_set_visible(g->shadow_rolloff, p->tone_profile == DT_NEGCONVERT_TONE_LINEAR);
 }
 
 void gui_changed(dt_iop_module_t *self, GtkWidget *w, void *previous)
