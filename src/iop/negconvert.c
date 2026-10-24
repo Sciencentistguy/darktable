@@ -355,15 +355,21 @@ static inline float _bump(const float x, const float c, const float w)
 
 static inline float _tone(const float x, const dt_iop_negconvert_tone_t profile)
 {
+  // density is already logarithmic, so the profiles only bend it gently. each keeps 0 and 1 in place and a
+  // finite slope at black, which would otherwise amplify the small channel differences there into color
   const float xp = fmaxf(x, 0.0f);
   switch(profile)
   {
     case DT_NEGCONVERT_TONE_LINEAR:
       return x;
     case DT_NEGCONVERT_TONE_LINEAR_GAMMA:
-      return powf(xp, 1.0f / 2.2f);
+    {
+      const float toe = 0.05f, g = 1.0f / 1.3f;
+      const float t0 = powf(toe, g);
+      return (powf(xp + toe, g) - t0) / (powf(1.0f + toe, g) - t0);
+    }
     case DT_NEGCONVERT_TONE_LOGARITHMIC:
-      return log2f(1.0f + 15.0f * xp) * 0.25f;
+      return log2f(1.0f + 2.0f * xp) / log2f(3.0f);
     case DT_NEGCONVERT_TONE_STANDARD:
     default:
       return powf(xp, 1.15f);
