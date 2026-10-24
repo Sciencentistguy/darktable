@@ -608,6 +608,15 @@ static void _process_pixel(const dt_iop_negconvert_data_t *const d, const float 
     for_each_channel(c) y[c] = 1.0f - _shoulder(1.0f - y[c], 1.0f - knee);
   }
 
+  if(p->clip_method == DT_NEGCONVERT_CLIP_PROTECTED)
+  {
+    // past white the ratio between the channels is mostly scan noise and the uneven shoulders of the dye
+    // layers, and keeping it gives blown areas a saturated, speckled color. fade it out, as a print goes white
+    const float peak = fmaxf(y[0], fmaxf(y[1], y[2]));
+    const float neutral = _smoothstep(1.0f, 2.0f, peak);
+    for_each_channel(c) y[c] += (peak - y[c]) * neutral;
+  }
+
   if(p->highlight_rolloff > 0.0f)
   {
     const float knee = 1.0f - 0.005f * p->highlight_rolloff;
