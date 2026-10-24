@@ -110,15 +110,17 @@ typedef enum dt_iop_negconvert_tone_t
   DT_NEGCONVERT_TONE_LAB_HIGHLIGHT_HARD = 4,  // $DESCRIPTION: "lab highlight hard"
   DT_NEGCONVERT_TONE_LAB_SHADOW_SOFT = 5,     // $DESCRIPTION: "lab shadow soft"
   DT_NEGCONVERT_TONE_LAB_SHADOW_HARD = 6,     // $DESCRIPTION: "lab shadow hard"
-  DT_NEGCONVERT_TONE_LINEAR = 7,              // $DESCRIPTION: "linear"
-  DT_NEGCONVERT_TONE_LINEAR_GAMMA = 8,        // $DESCRIPTION: "linear gamma"
-  DT_NEGCONVERT_TONE_LINEAR_FLAT = 9,         // $DESCRIPTION: "linear flat"
-  DT_NEGCONVERT_TONE_LINEAR_DEEP = 10,        // $DESCRIPTION: "linear deep"
+  DT_NEGCONVERT_TONE_NEUTRAL = 7,             // $DESCRIPTION: "neutral"
+  DT_NEGCONVERT_TONE_NEUTRAL_GAMMA = 8,       // $DESCRIPTION: "neutral gamma"
+  DT_NEGCONVERT_TONE_NEUTRAL_FLAT = 9,        // $DESCRIPTION: "neutral flat"
+  DT_NEGCONVERT_TONE_NEUTRAL_DEEP = 10,       // $DESCRIPTION: "neutral deep"
   DT_NEGCONVERT_TONE_CINEMATIC_RICH = 11,     // $DESCRIPTION: "cinematic rich"
   DT_NEGCONVERT_TONE_CINEMATIC_FLAT = 12,     // $DESCRIPTION: "cinematic flat"
-  DT_NEGCONVERT_TONE_CINEMATIC_LOG = 13       // $DESCRIPTION: "cinematic log"
+  DT_NEGCONVERT_TONE_CINEMATIC_LOG = 13,      // $DESCRIPTION: "cinematic log"
+  DT_NEGCONVERT_TONE_LINEAR = 14              // $DESCRIPTION: "linear"
 } dt_iop_negconvert_tone_t;
 
+// every profile but linear has a measured curve
 #define TONE_PROFILES 14
 #define TONE_KNOTS 17
 
@@ -207,7 +209,7 @@ typedef struct dt_iop_negconvert_gui_data_t
   GtkWidget *base_picker, *wb_picker, *analyze_picker;
   GtkWidget *analyze_black, *analyze_white;
   dt_gui_collapsible_section_t density_section;
-  GtkWidget *temp, *tint, *lab_density;
+  GtkWidget *temp, *tint, *lab_density, *shadow_rolloff;
   GtkWidget *auto_wb;
   // filled by the preview pipe, read by the gui thread, both under the module lock
   uint32_t analysis[3][ANALYSIS_BINS];
@@ -393,16 +395,16 @@ static const float _tone_curves[TONE_PROFILES][TONE_KNOTS] = {
   [DT_NEGCONVERT_TONE_LAB_SHADOW_HARD]
     = { 0.015f, 0.041f, 0.071f, 0.107f, 0.153f, 0.210f, 0.276f, 0.350f, 0.432f,
         0.517f, 0.604f, 0.689f, 0.769f, 0.842f, 0.906f, 0.958f, 0.999f },
-  [DT_NEGCONVERT_TONE_LINEAR]
+  [DT_NEGCONVERT_TONE_NEUTRAL]
     = { 0.000f, 0.062f, 0.125f, 0.188f, 0.250f, 0.312f, 0.375f, 0.438f, 0.500f,
         0.562f, 0.625f, 0.688f, 0.750f, 0.812f, 0.875f, 0.938f, 1.000f },
-  [DT_NEGCONVERT_TONE_LINEAR_GAMMA]
+  [DT_NEGCONVERT_TONE_NEUTRAL_GAMMA]
     = { 0.003f, 0.017f, 0.044f, 0.081f, 0.126f, 0.176f, 0.230f, 0.290f, 0.354f,
         0.423f, 0.496f, 0.574f, 0.657f, 0.743f, 0.829f, 0.914f, 0.993f },
-  [DT_NEGCONVERT_TONE_LINEAR_FLAT]
+  [DT_NEGCONVERT_TONE_NEUTRAL_FLAT]
     = { 0.041f, 0.094f, 0.147f, 0.200f, 0.254f, 0.309f, 0.365f, 0.421f, 0.477f,
         0.532f, 0.587f, 0.640f, 0.693f, 0.745f, 0.799f, 0.857f, 0.920f },
-  [DT_NEGCONVERT_TONE_LINEAR_DEEP]
+  [DT_NEGCONVERT_TONE_NEUTRAL_DEEP]
     = { 0.004f, 0.050f, 0.101f, 0.156f, 0.215f, 0.276f, 0.339f, 0.404f, 0.470f,
         0.538f, 0.607f, 0.676f, 0.745f, 0.813f, 0.879f, 0.940f, 0.994f },
   [DT_NEGCONVERT_TONE_CINEMATIC_RICH]
@@ -443,6 +445,7 @@ static inline float _nlp_linear(const float x)
 // offset leave 0.01
 static inline float _tone(const float x, const dt_iop_negconvert_tone_t profile, const float lab_density)
 {
+  if(profile == DT_NEGCONVERT_TONE_LINEAR) return x;
   const float *const k = _tone_curves[MIN(profile, TONE_PROFILES - 1)];
   const float u = _nlp_linear(x);
   const float xl = _is_lab_profile(profile) ? powf(u, expf(-lab_density)) : u;
@@ -1009,11 +1012,14 @@ void gui_init(dt_iop_module_t *self)
                                    "profiles of the same names.\n"
                                    "lab: bold contrast like a lab scanner, with a brightness correction "
                                    "that analyze sets from the picked area (lab density)\n"
-                                   "linear: a plain response, for flat results to grade later. "
+                                   "neutral: a plain response, for flat results to grade later "
+                                   "(negative lab pro calls it linear). "
                                    "gamma is darker and richer, flat lifts black and lowers white, "
                                    "deep is a touch darker\n"
                                    "cinematic: a logarithmic response with smooth mids and shadows "
-                                   "and detail kept in the highlights"));
+                                   "and detail kept in the highlights\n"
+                                   "linear: the normalized density as it is, with no curve; "
+                                   "the only profile that goes below black, where shadow rolloff applies"));
   g->lab_density = dt_bauhaus_slider_from_params(self, "lab_density");
   dt_bauhaus_slider_set_digits(g->lab_density, 3);
   gtk_widget_set_tooltip_text(g->lab_density, _("brightness correction of the lab tone profiles: positive values "
@@ -1021,7 +1027,7 @@ void gui_init(dt_iop_module_t *self)
                                                 "black and white stay in place.\n"
                                                 "analyze sets it from the brightness of the picked area, "
                                                 "pulling dark images up and bright ones down.\n"
-                                                "has no effect on the linear and cinematic profiles"));
+                                                "has no effect on the neutral, cinematic and linear profiles"));
 
   // page TONE
   page = self->widget = dt_ui_notebook_page(g->notebook, N_("tone"), NULL);
@@ -1094,12 +1100,14 @@ void gui_init(dt_iop_module_t *self)
                                    "at the cost of dimming the tones near white; "
                                    "negative white clip gives that range back.\n"
                                    "0 clips hard"));
-  w = dt_bauhaus_slider_from_params(self, "shadow_rolloff");
-  dt_bauhaus_slider_set_format(w, "%");
-  gtk_widget_set_tooltip_text(w, _("compress the darkest tones smoothly toward black instead of clipping them.\n"
-                                   "higher values start the rolloff earlier and recover more shadow detail, "
-                                   "at the cost of lifting the tones near black.\n"
-                                   "0 clips hard"));
+  g->shadow_rolloff = dt_bauhaus_slider_from_params(self, "shadow_rolloff");
+  dt_bauhaus_slider_set_format(g->shadow_rolloff, "%");
+  gtk_widget_set_tooltip_text(g->shadow_rolloff, _("compress the darkest tones smoothly toward black instead of "
+                                                   "clipping them.\n"
+                                                   "higher values start the rolloff earlier and recover more shadow "
+                                                   "detail, at the cost of lifting the tones near black.\n"
+                                                   "0 clips hard. only the linear tone profile goes below black, "
+                                                   "so it has no effect on the others"));
   w = dt_bauhaus_combobox_from_params(self, "clip_method");
   gtk_widget_set_tooltip_text(w, _(
                                    "what happens to values above white after the adjustments and rolloff\n"
@@ -1216,11 +1224,12 @@ void gui_init(dt_iop_module_t *self)
   DT_CONTROL_SIGNAL_HANDLE(DT_SIGNAL_DEVELOP_PREVIEW_PIPE_FINISHED, _preview_pipe_finished_callback);
 }
 
-static void _update_lab_density_sensitivity(dt_iop_module_t *self)
+static void _update_profile_sensitivity(dt_iop_module_t *self)
 {
   dt_iop_negconvert_gui_data_t *g = self->gui_data;
   const dt_iop_negconvert_params_t *p = self->params;
   gtk_widget_set_sensitive(g->lab_density, _is_lab_profile(p->tone_profile));
+  gtk_widget_set_sensitive(g->shadow_rolloff, p->tone_profile == DT_NEGCONVERT_TONE_LINEAR);
 }
 
 void gui_changed(dt_iop_module_t *self, GtkWidget *w, void *previous)
@@ -1229,14 +1238,14 @@ void gui_changed(dt_iop_module_t *self, GtkWidget *w, void *previous)
 
   // redo the analysis of the area already picked with the new percentiles
   if(w == g->analyze_black || w == g->analyze_white) _apply_analysis(self);
-  _update_lab_density_sensitivity(self);
+  _update_profile_sensitivity(self);
 }
 
 void gui_update(dt_iop_module_t *const self)
 {
   dt_iop_negconvert_gui_data_t *g = self->gui_data;
   dt_gui_update_collapsible_section(&g->density_section);
-  _update_lab_density_sensitivity(self);
+  _update_profile_sensitivity(self);
   dt_iop_color_picker_reset(self, TRUE);
 }
 
