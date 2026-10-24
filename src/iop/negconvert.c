@@ -187,8 +187,8 @@ typedef struct dt_iop_negconvert_params_t
   dt_iop_negconvert_clip_t clip_method;          // $DEFAULT: DT_NEGCONVERT_CLIP_PROTECTED $DESCRIPTION: "clip method"
   float highlight_rolloff;                       // $MIN: 0.0 $MAX: 100.0 $DEFAULT: 25.0 $DESCRIPTION: "highlight rolloff"
   float shadow_rolloff;                          // $MIN: 0.0 $MAX: 100.0 $DEFAULT: 25.0 $DESCRIPTION: "shadow rolloff"
-  float analyze_black;                           // $MIN: 0.01 $MAX: 20.0 $DEFAULT: 1.0 $DESCRIPTION: "black percentile"
-  float analyze_white;                           // $MIN: 0.01 $MAX: 20.0 $DEFAULT: 1.0 $DESCRIPTION: "white percentile"
+  float analyze_black;                           // $MIN: 0.0 $MAX: 50.0 $DEFAULT: 1.0 $DESCRIPTION: "black percentile"
+  float analyze_white;                           // $MIN: 0.0 $MAX: 50.0 $DEFAULT: 1.0 $DESCRIPTION: "white percentile"
   float contrast;                                // $MIN: -100.0 $MAX: 100.0 $DEFAULT: 0.0 $DESCRIPTION: "contrast"
   float auto_density;                             // $MIN: -0.5 $MAX: 0.5 $DEFAULT: 0.0 $DESCRIPTION: "auto density"
 } dt_iop_negconvert_params_t;
@@ -980,20 +980,22 @@ void gui_init(dt_iop_module_t *self)
   g->analyze_black = dt_bauhaus_slider_from_params(self, "analyze_black");
   GtkWidget *w = g->analyze_black;
   dt_bauhaus_slider_set_format(w, "%");
-  dt_bauhaus_slider_set_soft_range(w, 0.01f, 5.0f);
+  dt_bauhaus_slider_set_soft_range(w, 0.0f, 5.0f);
   dt_bauhaus_slider_set_log_curve(w);
   dt_bauhaus_slider_set_digits(w, 3);
   gtk_widget_set_tooltip_text(w, _("share of the pixels, from the thinnest end of the negative, that analyze "
                                    "lets clip to black.\n"
-                                   "raise it to ignore a bright film border or holder inside the picked area"));
+                                   "raise it to ignore a bright film border or holder inside the picked area. "
+                                   "0 takes the single thinnest pixel"));
   w = g->analyze_white = dt_bauhaus_slider_from_params(self, "analyze_white");
   dt_bauhaus_slider_set_format(w, "%");
-  dt_bauhaus_slider_set_soft_range(w, 0.01f, 5.0f);
+  dt_bauhaus_slider_set_soft_range(w, 0.0f, 5.0f);
   dt_bauhaus_slider_set_log_curve(w);
   dt_bauhaus_slider_set_digits(w, 3);
   gtk_widget_set_tooltip_text(w, _("share of the pixels, from the densest end of the negative, that analyze "
                                    "lets clip to white.\n"
-                                   "raise it to ignore dust and specular highlights"));
+                                   "raise it to ignore dust and specular highlights. "
+                                   "0 takes the single densest pixel"));
 
   GtkWidget *density_box = dt_gui_vbox();
   dt_gui_box_add(page, density_box);
