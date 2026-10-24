@@ -203,12 +203,6 @@ typedef struct dt_iop_negconvert_data_t
   dt_iop_negconvert_params_t p;
 } dt_iop_negconvert_data_t;
 
-typedef enum dt_iop_negconvert_pending_t
-{
-  DT_NEGCONVERT_PENDING_NONE = 0,
-  DT_NEGCONVERT_PENDING_AUTO_WB
-} dt_iop_negconvert_pending_t;
-
 typedef struct dt_iop_negconvert_gui_data_t
 {
   GtkNotebook *notebook;
@@ -217,14 +211,10 @@ typedef struct dt_iop_negconvert_gui_data_t
   GtkWidget *analyze_black, *analyze_white;
   dt_gui_collapsible_section_t density_section;
   GtkWidget *temp, *tint, *auto_density, *shadow_rolloff;
-  GtkWidget *auto_wb;
-  // filled by the preview pipe, read by the gui thread, both under the module lock
-  uint32_t analysis[3][ANALYSIS_BINS];
-  gboolean analysis_valid;
-  // same, limited to the area the analyze picker last covered
+  // the area the density or white balance picker last covered; filled by the preview pipe, read by the gui
+  // thread, both under the module lock
   uint32_t area_analysis[3][ANALYSIS_BINS];
   gboolean area_valid;
-  dt_iop_negconvert_pending_t pending;
 } dt_iop_negconvert_gui_data_t;
 
 const char *name()
@@ -642,42 +632,30 @@ static void _fill_histogram(uint32_t *const hist, const float *const in, const d
     }
 }
 
-// the preview pipe sees the whole (cropped) frame, so it feeds the density range analysis
+// the preview pipe sees the whole (cropped) frame, so it counts the area under the density or white balance
+// picker. the film base picker covers the border, which must not become the area the analysis works on
 static void _collect_analysis(dt_iop_module_t *self, const float *const in, const dt_iop_roi_t *const roi)
 {
   dt_iop_negconvert_gui_data_t *g = self->gui_data;
 
-  uint32_t *hist = g_malloc0_n(3 * ANALYSIS_BINS, sizeof(uint32_t));
-  _fill_histogram(hist, in, roi, 0, 0, roi->width, roi->height);
-
-  // while the analyze or white balance picker is active, also count the picked area alone; the film base
-  // picker covers the border, which must not become the area the analysis works on
   const dt_iop_color_picker_t *const picker = darktable.lib->proxy.colorpicker.picker_proxy;
-  uint32_t *area = NULL;
-  if(self->request_color_pick == DT_REQUEST_COLORPICK_MODULE && picker
-     && (picker->colorpick == g->analyze_picker || picker->colorpick == g->wb_picker)
-     && darktable.lib->proxy.colorpicker.primary_sample)
-  {
-    int box[4];
-    if(!dt_color_picker_box(self, roi, darktable.lib->proxy.colorpicker.primary_sample, PIXELPIPE_PICKER_INPUT,
-                            box))
-    {
-      area = g_malloc0_n(3 * ANALYSIS_BINS, sizeof(uint32_t));
-      _fill_histogram(area, in, roi, CLAMP(box[0], 0, roi->width), CLAMP(box[1], 0, roi->height),
-                      CLAMP(box[2], 0, roi->width), CLAMP(box[3], 0, roi->height));
-    }
-  }
+  if(self->request_color_pick != DT_REQUEST_COLORPICK_MODULE || !picker
+     || (picker->colorpick != g->analyze_picker && picker->colorpick != g->wb_picker)
+     || !darktable.lib->proxy.colorpicker.primary_sample)
+    return;
+
+  int box[4];
+  if(dt_color_picker_box(self, roi, darktable.lib->proxy.colorpicker.primary_sample, PIXELPIPE_PICKER_INPUT, box))
+    return;
+
+  uint32_t *area = g_malloc0_n(3 * ANALYSIS_BINS, sizeof(uint32_t));
+  _fill_histogram(area, in, roi, CLAMP(box[0], 0, roi->width), CLAMP(box[1], 0, roi->height),
+                  CLAMP(box[2], 0, roi->width), CLAMP(box[3], 0, roi->height));
 
   dt_iop_gui_enter_critical_section(self);
-  memcpy(g->analysis, hist, sizeof(g->analysis));
-  g->analysis_valid = TRUE;
-  if(area)
-  {
-    memcpy(g->area_analysis, area, sizeof(g->area_analysis));
-    g->area_valid = TRUE;
-  }
+  memcpy(g->area_analysis, area, sizeof(g->area_analysis));
+  g->area_valid = TRUE;
   dt_iop_gui_leave_critical_section(self);
-  g_free(hist);
   g_free(area);
 }
 
@@ -869,67 +847,6 @@ static void _apply_area_wb(dt_iop_module_t *self)
   _set_balance(self, x);
 }
 
-// white balance from the area last picked for analysis, or the whole frame if there is none
-static void _apply_auto_wb(dt_iop_module_t *self)
-{
-  dt_iop_negconvert_gui_data_t *g = self->gui_data;
-
-  float median[3];
-  dt_iop_gui_enter_critical_section(self);
-  const uint32_t(*const hist)[ANALYSIS_BINS] = g->area_valid ? g->area_analysis : g->analysis;
-  for(int c = 0; c < 3; c++) median[c] = _histogram_percentile(hist[c], 0.5f);
-  dt_iop_gui_leave_critical_section(self);
-
-  float x[3];
-  _unbalanced_density(self, median, x);
-  _set_balance(self, x);
-}
-
-static void _run_pending(dt_iop_module_t *self)
-{
-  dt_iop_negconvert_gui_data_t *g = self->gui_data;
-  const dt_iop_negconvert_pending_t action = g->pending;
-  g->pending = DT_NEGCONVERT_PENDING_NONE;
-
-  if(action == DT_NEGCONVERT_PENDING_AUTO_WB)
-    _apply_auto_wb(self);
-}
-
-static void _preview_pipe_finished_callback(gpointer instance, dt_iop_module_t *self)
-{
-  dt_iop_negconvert_gui_data_t *g = self->gui_data;
-  if(!g || g->pending == DT_NEGCONVERT_PENDING_NONE) return;
-
-  dt_iop_gui_enter_critical_section(self);
-  const gboolean valid = g->analysis_valid;
-  dt_iop_gui_leave_critical_section(self);
-  if(valid) _run_pending(self);
-}
-
-static void _request_analysis(dt_iop_module_t *self, const dt_iop_negconvert_pending_t action)
-{
-  dt_iop_negconvert_gui_data_t *g = self->gui_data;
-
-  g->pending = action;
-  if(self->enabled)
-  {
-    dt_iop_gui_enter_critical_section(self);
-    const gboolean valid = g->analysis_valid;
-    dt_iop_gui_leave_critical_section(self);
-    if(valid) _run_pending(self);
-  }
-  else
-  {
-    // the preview pipe only sees this module's input once it runs
-    dt_dev_add_history_item(darktable.develop, self, TRUE);
-  }
-}
-
-static void _auto_wb_clicked(GtkWidget *widget, dt_iop_module_t *self)
-{
-  _request_analysis(self, DT_NEGCONVERT_PENDING_AUTO_WB);
-}
-
 static GtkWidget *_triplet_slider(dt_iop_module_t *self, const char *const field[3], GtkWidget *out[3],
                                   const char *const label[3], const char *const tooltip)
 {
@@ -1116,20 +1033,16 @@ void gui_init(dt_iop_module_t *self)
   // page COLOR
   page = self->widget = dt_ui_notebook_page(g->notebook, N_("color"), NULL);
   g->wb_picker = dt_color_picker_new(self, DT_COLOR_PICKER_AREA, NULL);
-  gtk_widget_set_tooltip_text(g->wb_picker, _("pick an area that should be neutral gray in the positive, "
-                                              "such as a gray card, a white shirt or a concrete wall.\n"
-                                              "sets temp and tint so the median of each channel in the area has no color cast, "
-                                              "so dust and stray pixels in it do not matter.\n"
+  gtk_widget_set_tooltip_text(g->wb_picker, _("sets temp and tint so the median of each channel in the picked area "
+                                              "has no color cast, so dust and stray pixels in it do not matter.\n"
+                                              "pick a known neutral, such as a gray card, a white shirt or a concrete wall, "
+                                              "or pick the whole image (minus the film border) for an automatic balance "
+                                              "that assumes the scene averages out to gray; that fails on images "
+                                              "dominated by one color.\n"
                                               "set the film base and density range first, "
                                               "as they define the response the balance is computed from"));
   dt_action_define_iop(self, N_("pickers"), N_("white balance"), g->wb_picker, &dt_action_def_color_picker);
-  g->auto_wb = dt_iop_button_new(self, N_("auto white balance"), G_CALLBACK(_auto_wb_clicked), FALSE, 0, 0, NULL, 0, NULL);
-  gtk_widget_set_tooltip_text(g->auto_wb, _("set temp and tint so the median of each channel is neutral.\n"
-                                            "this assumes the scene averages out to gray, so it fails on images "
-                                            "dominated by one color: use the picker on a known neutral there.\n"
-                                            "it uses the area last picked with the density or white balance picker; "
-                                            "without one, the whole frame, so crop away the film border first"));
-  dt_gui_box_add(page, dt_ui_section_label_new(C_("section", "white balance")), g->wb_picker, g->auto_wb);
+  dt_gui_box_add(page, dt_ui_section_label_new(C_("section", "white balance")), g->wb_picker);
   g->temp = w = dt_bauhaus_slider_from_params(self, "temp");
   dt_bauhaus_slider_set_soft_range(w, -30.0f, 30.0f);
   dt_bauhaus_slider_set_stop(w, 0.0, 0.3, 0.3, 1);
@@ -1251,8 +1164,6 @@ void gui_init(dt_iop_module_t *self)
 
   self->widget = dt_gui_vbox();
   dt_gui_box_add(self->widget, g->notebook);
-
-  DT_CONTROL_SIGNAL_HANDLE(DT_SIGNAL_DEVELOP_PREVIEW_PIPE_FINISHED, _preview_pipe_finished_callback);
 }
 
 static void _update_profile_sensitivity(dt_iop_module_t *self)
