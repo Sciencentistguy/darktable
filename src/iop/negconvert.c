@@ -862,6 +862,7 @@ void gui_init(dt_iop_module_t *self)
   dt_bauhaus_slider_set_format(w, "%");
   dt_bauhaus_slider_set_soft_range(w, 0.01f, 5.0f);
   dt_bauhaus_slider_set_log_curve(w);
+  dt_bauhaus_slider_set_digits(w, 3);
   gtk_widget_set_tooltip_text(w, _("share of the pixels, from the thinnest end of the negative, that analyze "
                                    "lets clip to black.\n"
                                    "raise it to ignore a bright film border or holder inside the picked area"));
@@ -869,6 +870,7 @@ void gui_init(dt_iop_module_t *self)
   dt_bauhaus_slider_set_format(w, "%");
   dt_bauhaus_slider_set_soft_range(w, 0.01f, 5.0f);
   dt_bauhaus_slider_set_log_curve(w);
+  dt_bauhaus_slider_set_digits(w, 3);
   gtk_widget_set_tooltip_text(w, _("share of the pixels, from the densest end of the negative, that analyze "
                                    "lets clip to white.\n"
                                    "raise it to ignore dust and specular highlights"));
