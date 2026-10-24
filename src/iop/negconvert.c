@@ -541,9 +541,13 @@ static void _collect_analysis(dt_iop_module_t *self, const float *const in, cons
   uint32_t *hist = g_malloc0_n(3 * ANALYSIS_BINS, sizeof(uint32_t));
   _fill_histogram(hist, in, roi, 0, 0, roi->width, roi->height);
 
-  // while a picker is active, also count the picked area alone for the analyze picker
+  // while the analyze or white balance picker is active, also count the picked area alone; the film base
+  // picker covers the border, which must not become the area the analysis works on
+  const dt_iop_color_picker_t *const picker = darktable.lib->proxy.colorpicker.picker_proxy;
   uint32_t *area = NULL;
-  if(self->request_color_pick == DT_REQUEST_COLORPICK_MODULE && darktable.lib->proxy.colorpicker.primary_sample)
+  if(self->request_color_pick == DT_REQUEST_COLORPICK_MODULE && picker
+     && (picker->colorpick == g->analyze_picker || picker->colorpick == g->wb_picker)
+     && darktable.lib->proxy.colorpicker.primary_sample)
   {
     int box[4];
     if(!dt_color_picker_box(self, roi, darktable.lib->proxy.colorpicker.primary_sample, PIXELPIPE_PICKER_INPUT,
@@ -745,14 +749,15 @@ static void _apply_area_wb(dt_iop_module_t *self)
   _set_balance(self, x);
 }
 
-// white balance from the image itself: the median of each channel is assumed to be neutral
+// white balance from the area last picked for analysis, or the whole frame if there is none
 static void _apply_auto_wb(dt_iop_module_t *self)
 {
   dt_iop_negconvert_gui_data_t *g = self->gui_data;
 
   float median[3];
   dt_iop_gui_enter_critical_section(self);
-  for(int c = 0; c < 3; c++) median[c] = _histogram_percentile(g->analysis[c], 0.5f);
+  const uint32_t(*const hist)[ANALYSIS_BINS] = g->area_valid ? g->area_analysis : g->analysis;
+  for(int c = 0; c < 3; c++) median[c] = _histogram_percentile(hist[c], 0.5f);
   dt_iop_gui_leave_critical_section(self);
 
   float x[3];
@@ -916,7 +921,8 @@ void gui_init(dt_iop_module_t *self)
   gtk_widget_set_tooltip_text(g->auto_wb, _("set temp and tint so the median of each channel is neutral.\n"
                                             "this assumes the scene averages out to gray, so it fails on images "
                                             "dominated by one color: use the picker on a known neutral there.\n"
-                                            "crop away the film border first"));
+                                            "it uses the area last picked with the density range or white balance picker; "
+                                            "without one, the whole frame, so crop away the film border first"));
   dt_gui_box_add(page, dt_ui_section_label_new(C_("section", "white balance")), g->wb_picker, g->auto_wb);
   g->temp = w = dt_bauhaus_slider_from_params(self, "temp");
   dt_bauhaus_slider_set_soft_range(w, -30.0f, 30.0f);
