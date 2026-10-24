@@ -1110,6 +1110,8 @@ void gui_changed(dt_iop_module_t *self, GtkWidget *w, void *previous)
 
 void gui_update(dt_iop_module_t *const self)
 {
+  dt_iop_negconvert_gui_data_t *g = self->gui_data;
+  dt_gui_update_collapsible_section(&g->density_section);
   dt_iop_color_picker_reset(self, TRUE);
 }
 
