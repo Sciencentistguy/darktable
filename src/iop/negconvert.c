@@ -18,6 +18,7 @@
 
 #include "bauhaus/bauhaus.h"
 #include "common/color_picker.h"
+#include "common/colorspaces.h"
 #include "common/darktable.h"
 #include "control/control.h"
 #include "develop/develop.h"
@@ -211,6 +212,9 @@ typedef struct dt_iop_negconvert_gui_data_t
   GtkWidget *analyze_black, *analyze_white;
   dt_gui_collapsible_section_t density_section;
   GtkWidget *temp, *tint, *auto_density, *shadow_rolloff;
+  // hue and strength are another view of temp and tint, kept only in the gui
+  GtkWidget *wb_box, *hue, *strength;
+  GtkNotebook *wb_notebook;
   // the area the density or white balance picker last covered; filled by the preview pipe, read by the gui
   // thread, both under the module lock
   uint32_t area_analysis[3][ANALYSIS_BINS];
@@ -699,6 +703,75 @@ static void _apply_base(dt_iop_module_t *self)
   dt_dev_add_history_item(darktable.develop, self, TRUE);
 }
 
+// temp and tint shift the channels by (temp, -tint, -temp). hue is the angle of that shift on the usual
+// hexagonal chroma plane (0 red, 60 yellow, 120 green, 180 cyan, 240 blue, 300 magenta) and strength its
+// length; the common part of the shift is brightness and has no hue
+static void _temp_tint_to_hue(const float temp, const float tint, float *hue, float *strength)
+{
+  const float x = 1.5f * temp + 0.5f * tint;
+  const float y = 0.5f * sqrtf(3.0f) * (temp - tint);
+  *strength = hypotf(x, y);
+  const float degrees = atan2f(y, x) * 180.0f / M_PI_F;
+  *hue = degrees < 0.0f ? degrees + 360.0f : degrees;
+}
+
+static void _hue_to_temp_tint(const float hue, const float strength, float *temp, float *tint)
+{
+  const float x = strength * cosf(hue * M_PI_F / 180.0f);
+  const float y = strength * sinf(hue * M_PI_F / 180.0f);
+  *temp = 0.5f * (x + y / sqrtf(3.0f));
+  *tint = *temp - 2.0f * y / sqrtf(3.0f);
+}
+
+static void _paint_strength(dt_iop_negconvert_gui_data_t *g, const float hue)
+{
+  dt_aligned_pixel_t rgb;
+  hsl2rgb(rgb, hue / 360.0f, 1.0f, 0.5f);
+  dt_bauhaus_slider_clear_stops(g->strength);
+  dt_bauhaus_slider_set_stop(g->strength, 0.0f, 0.5f, 0.5f, 0.5f);
+  dt_bauhaus_slider_set_stop(g->strength, 1.0f, rgb[0], rgb[1], rgb[2]);
+  gtk_widget_queue_draw(g->strength);
+}
+
+static void _update_hue_strength(dt_iop_module_t *self)
+{
+  dt_iop_negconvert_gui_data_t *g = self->gui_data;
+  const dt_iop_negconvert_params_t *p = self->params;
+
+  float hue, strength;
+  _temp_tint_to_hue(p->temp, p->tint, &hue, &strength);
+  DT_ENTER_GUI_UPDATE();
+  dt_bauhaus_slider_set(g->strength, strength);
+  // without a shift the hue is undefined, so keep the one the user last set
+  if(strength > 1e-3f)
+  {
+    dt_bauhaus_slider_set(g->hue, hue);
+    _paint_strength(g, hue);
+  }
+  DT_LEAVE_GUI_UPDATE();
+}
+
+static void _hue_strength_changed(GtkWidget *widget, dt_iop_module_t *self)
+{
+  DT_GUARD_GUI_UPDATE();
+  dt_iop_negconvert_gui_data_t *g = self->gui_data;
+  dt_iop_negconvert_params_t *p = self->params;
+
+  const float hue = dt_bauhaus_slider_get(g->hue);
+  float temp, tint;
+  _hue_to_temp_tint(hue, dt_bauhaus_slider_get(g->strength), &temp, &tint);
+  p->temp = CLAMP(temp, -100.0f, 100.0f);
+  p->tint = CLAMP(tint, -100.0f, 100.0f);
+
+  DT_ENTER_GUI_UPDATE();
+  dt_bauhaus_slider_set(g->temp, p->temp);
+  dt_bauhaus_slider_set(g->tint, p->tint);
+  _paint_strength(g, hue);
+  DT_LEAVE_GUI_UPDATE();
+
+  dt_dev_add_history_item(darktable.develop, self, TRUE);
+}
+
 // choose temp and tint so that an area with the given normalized densities comes out neutral
 static void _set_balance(dt_iop_module_t *self, const float x[3])
 {
@@ -730,6 +803,7 @@ static void _set_balance(dt_iop_module_t *self, const float x[3])
   dt_bauhaus_slider_set(g->temp, p->temp);
   dt_bauhaus_slider_set(g->tint, p->tint);
   DT_LEAVE_GUI_UPDATE();
+  _update_hue_strength(self);
 
   dt_dev_add_history_item(darktable.develop, self, TRUE);
 }
@@ -1042,24 +1116,10 @@ void gui_init(dt_iop_module_t *self)
                                               "set the film base and density range first, "
                                               "as they define the response the balance is computed from"));
   dt_action_define_iop(self, N_("pickers"), N_("white balance"), g->wb_picker, &dt_action_def_color_picker);
-  dt_gui_box_add(page, dt_ui_section_label_new(C_("section", "white balance")), g->wb_picker);
-  g->temp = w = dt_bauhaus_slider_from_params(self, "temp");
-  dt_bauhaus_slider_set_soft_range(w, -30.0f, 30.0f);
-  dt_bauhaus_slider_set_stop(w, 0.0, 0.3, 0.3, 1);
-  dt_bauhaus_slider_set_stop(w, 0.5, 0.5, 0.5, 0.5);
-  dt_bauhaus_slider_set_stop(w, 1.0, 1, 1, 0.25);
-  gtk_widget_set_tooltip_text(w, _(
-                                   "shifts the color balance along the blue/yellow axis\n"
-                                   "positive values warm the image, negative values cool it\n"
-                                   "the film base picker neutralizes the orange mask; use this for the rest"));
-  g->tint = w = dt_bauhaus_slider_from_params(self, "tint");
-  dt_bauhaus_slider_set_soft_range(w, -30.0f, 30.0f);
-  dt_bauhaus_slider_set_stop(w, 0.0, 0.25, 1, 0.25);
-  dt_bauhaus_slider_set_stop(w, 0.5, 0.5, 0.5, 0.5);
-  dt_bauhaus_slider_set_stop(w, 1.0, 1, 0.25, 1);
-  gtk_widget_set_tooltip_text(w, _(
-                                   "shifts the color balance along the green/magenta axis\n"
-                                   "positive values add magenta, negative values add green"));
+  // the white balance tabs are filled in below, after the module's own pages: a notebook created in between
+  // would stop the later pages from being registered as shortcut elements (dt_ui_notebook_page, gui/gtk.c)
+  g->wb_box = dt_gui_vbox();
+  dt_gui_box_add(page, dt_ui_section_label_new(C_("section", "white balance")), g->wb_picker, g->wb_box);
   dt_gui_box_add(page, dt_ui_section_label_new(C_("section", "ranges")));
   w = dt_bauhaus_slider_from_params(self, "shadows_range");
   gtk_widget_set_tooltip_text(w, _(
@@ -1162,6 +1222,53 @@ void gui_init(dt_iop_module_t *self)
                                    "adds a soft glow to the highlights\n"
                                    "negative values darken them"));
 
+  static dt_action_def_t wb_notebook_def = { };
+  g->wb_notebook = dt_ui_notebook_new(&wb_notebook_def);
+  dt_action_define_iop(self, N_("white balance"), N_("page"), GTK_WIDGET(g->wb_notebook), &wb_notebook_def);
+  dt_gui_box_add(g->wb_box, g->wb_notebook);
+
+  self->widget = dt_ui_notebook_page(g->wb_notebook, N_("temp/tint"), _("temperature and tint"));
+  g->temp = w = dt_bauhaus_slider_from_params(self, "temp");
+  dt_bauhaus_slider_set_soft_range(w, -30.0f, 30.0f);
+  dt_bauhaus_slider_set_stop(w, 0.0, 0.3, 0.3, 1);
+  dt_bauhaus_slider_set_stop(w, 0.5, 0.5, 0.5, 0.5);
+  dt_bauhaus_slider_set_stop(w, 1.0, 1, 1, 0.25);
+  gtk_widget_set_tooltip_text(w, _(
+                                   "shifts the color balance along the blue/yellow axis\n"
+                                   "positive values warm the image, negative values cool it\n"
+                                   "the film base picker neutralizes the orange mask; use this for the rest"));
+  g->tint = w = dt_bauhaus_slider_from_params(self, "tint");
+  dt_bauhaus_slider_set_soft_range(w, -30.0f, 30.0f);
+  dt_bauhaus_slider_set_stop(w, 0.0, 0.25, 1, 0.25);
+  dt_bauhaus_slider_set_stop(w, 0.5, 0.5, 0.5, 0.5);
+  dt_bauhaus_slider_set_stop(w, 1.0, 1, 0.25, 1);
+  gtk_widget_set_tooltip_text(w, _(
+                                   "shifts the color balance along the green/magenta axis\n"
+                                   "positive values add magenta, negative values add green"));
+
+  page = dt_ui_notebook_page(g->wb_notebook, N_("hue/strength"), _("hue and strength"));
+  g->hue = dt_bauhaus_slider_new_with_range(self, 0.0f, 360.0f, 0, 0.0f, 1);
+  dt_bauhaus_widget_set_label(g->hue, NULL, N_("hue"));
+  dt_bauhaus_slider_set_format(g->hue, "°");
+  for(int k = 0; k <= 6; k++)
+  {
+    dt_aligned_pixel_t rgb;
+    hsl2rgb(rgb, k / 6.0f, 1.0f, 0.5f);
+    dt_bauhaus_slider_set_stop(g->hue, k / 6.0f, rgb[0], rgb[1], rgb[2]);
+  }
+  gtk_widget_set_tooltip_text(g->hue, _("the color the balance shifts the image toward\n"
+                                        "this is the same white balance as temp and tint, as an angle; "
+                                        "changing one updates the other"));
+  g_signal_connect(G_OBJECT(g->hue), "value-changed", G_CALLBACK(_hue_strength_changed), self);
+  g->strength = dt_bauhaus_slider_new_with_range(self, 0.0f, 200.0f, 0, 0.0f, 2);
+  dt_bauhaus_widget_set_label(g->strength, NULL, N_("strength"));
+  dt_bauhaus_slider_set_soft_range(g->strength, 0.0f, 50.0f);
+  gtk_widget_set_tooltip_text(g->strength, _("how far the balance shifts the image toward the hue\n"
+                                             "0 leaves the colors as converted"));
+  g_signal_connect(G_OBJECT(g->strength), "value-changed", G_CALLBACK(_hue_strength_changed), self);
+  _paint_strength(g, 0.0f);
+  dt_gui_box_add(page, g->hue, g->strength);
+
   self->widget = dt_gui_vbox();
   dt_gui_box_add(self->widget, g->notebook);
 }
@@ -1180,6 +1287,7 @@ void gui_changed(dt_iop_module_t *self, GtkWidget *w, void *previous)
 
   // redo the analysis of the area already picked with the new percentiles
   if(w == g->analyze_black || w == g->analyze_white) _apply_analysis(self);
+  if(w == g->temp || w == g->tint) _update_hue_strength(self);
   _update_profile_sensitivity(self);
 }
 
@@ -1188,6 +1296,7 @@ void gui_update(dt_iop_module_t *const self)
   dt_iop_negconvert_gui_data_t *g = self->gui_data;
   dt_gui_update_collapsible_section(&g->density_section);
   _update_profile_sensitivity(self);
+  _update_hue_strength(self);
   dt_iop_color_picker_reset(self, TRUE);
 }
 
