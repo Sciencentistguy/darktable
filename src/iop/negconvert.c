@@ -195,6 +195,7 @@ typedef struct dt_iop_negconvert_params_t
   float analyze_white;                           // $MIN: 0.0 $MAX: 50.0 $DEFAULT: 1.0 $DESCRIPTION: "white percentile"
   float contrast;                                // $MIN: -100.0 $MAX: 100.0 $DEFAULT: 0.0 $DESCRIPTION: "contrast"
   float auto_density;                             // $MIN: -0.5 $MAX: 0.5 $DEFAULT: 0.0 $DESCRIPTION: "auto density"
+  float highlight_fade;                          // $MIN: 0.0 $MAX: 100.0 $DEFAULT: 50.0 $DESCRIPTION: "highlight fade"
 } dt_iop_negconvert_params_t;
 
 typedef struct dt_iop_negconvert_data_t
@@ -215,7 +216,7 @@ typedef struct dt_iop_negconvert_gui_data_t
   GtkWidget *base_picker, *wb_picker, *analyze_picker;
   GtkWidget *analyze_black, *analyze_white;
   dt_gui_collapsible_section_t density_section;
-  GtkWidget *temp, *tint, *auto_density, *shadow_rolloff;
+  GtkWidget *temp, *tint, *auto_density, *shadow_rolloff, *highlight_fade;
   // hue and strength are another view of temp and tint, kept only in the gui
   GtkWidget *wb_box, *hue, *strength;
   GtkNotebook *wb_notebook;
@@ -611,9 +612,13 @@ static void _process_pixel(const dt_iop_negconvert_data_t *const d, const float 
   if(p->clip_method == DT_NEGCONVERT_CLIP_PROTECTED)
   {
     // past white the ratio between the channels is mostly scan noise and the uneven shoulders of the dye
-    // layers, and keeping it gives blown areas a saturated, speckled color. fade it out, as a print goes white
+    // layers, and keeping it gives blown areas a saturated, speckled color. fade it out, as a print goes white.
+    // starting below white also catches the edge of a blown area, where the channel with the narrowest density
+    // range overtakes the others first; 0 fades from 1 to 1.5, 100 from 0.8 to 1.2
     const float peak = fmaxf(y[0], fmaxf(y[1], y[2]));
-    const float neutral = _smoothstep(1.0f, 1.5f, peak);
+    const float fade_start = 1.0f - 0.002f * p->highlight_fade;
+    const float fade_end = fade_start + 0.5f - 0.001f * p->highlight_fade;
+    const float neutral = _smoothstep(fade_start, fade_end, peak);
     for_each_channel(c) y[c] += (peak - y[c]) * neutral;
   }
 
@@ -1164,6 +1169,17 @@ void gui_init(dt_iop_module_t *self)
                                    "what happens to values above white after the adjustments and rolloff\n"
                                    "color protected: scale all channels together, keeping hue\n"
                                    "per channel: clip each channel on its own, which can shift hue"));
+  g->highlight_fade = dt_bauhaus_slider_from_params(self, "highlight_fade");
+  dt_bauhaus_slider_set_format(g->highlight_fade, "%");
+  gtk_widget_set_tooltip_text(g->highlight_fade, _("fade blown highlights to white instead of keeping their color.\n"
+                                                   "past white the color of a pixel is mostly scan noise and film "
+                                                   "that saturates unevenly, which shows as colored speckle "
+                                                   "and a colored rim around lamps and windows.\n"
+                                                   "higher values start the fade further below white, removing the rim "
+                                                   "at the cost of some color in the brightest highlights; "
+                                                   "0 only fades what is past white.\n"
+                                                   "only shown with the color protected clip method; "
+                                                   "per channel already clips blown areas to white"));
 
   // page COLOR
   page = self->widget = dt_ui_notebook_page(g->notebook, N_("color"), NULL);
@@ -1340,6 +1356,7 @@ static void _update_profile_sensitivity(dt_iop_module_t *self)
   const dt_iop_negconvert_params_t *p = self->params;
   gtk_widget_set_visible(g->auto_density, _has_auto_density(p->tone_profile));
   gtk_widget_set_visible(g->shadow_rolloff, p->tone_profile == DT_NEGCONVERT_TONE_LINEAR);
+  gtk_widget_set_visible(g->highlight_fade, p->clip_method == DT_NEGCONVERT_CLIP_PROTECTED);
 }
 
 void gui_changed(dt_iop_module_t *self, GtkWidget *w, void *previous)
