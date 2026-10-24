@@ -75,9 +75,6 @@
 // analysis histogram of log2(transmittance), 16 bins per EV over -32..0 EV
 #define ANALYSIS_BINS 512
 #define ANALYSIS_BINS_PER_EV 16
-// percentiles of the density distribution that become black and white
-#define ANALYSIS_BLACK_PERCENTILE 0.01f
-#define ANALYSIS_WHITE_PERCENTILE 0.01f
 
 DT_MODULE_INTROSPECTION(1, dt_iop_negconvert_params_t)
 
@@ -164,6 +161,8 @@ typedef struct dt_iop_negconvert_params_t
   dt_iop_negconvert_clip_t clip_method;          // $DEFAULT: DT_NEGCONVERT_CLIP_PROTECTED $DESCRIPTION: "clip method"
   float highlight_rolloff;                       // $MIN: 0.0 $MAX: 100.0 $DEFAULT: 25.0 $DESCRIPTION: "highlight rolloff"
   float shadow_rolloff;                          // $MIN: 0.0 $MAX: 100.0 $DEFAULT: 25.0 $DESCRIPTION: "shadow rolloff"
+  float analyze_black;                           // $MIN: 0.0 $MAX: 20.0 $DEFAULT: 1.0 $DESCRIPTION: "black percentile"
+  float analyze_white;                           // $MIN: 0.0 $MAX: 20.0 $DEFAULT: 1.0 $DESCRIPTION: "white percentile"
 } dt_iop_negconvert_params_t;
 
 typedef struct dt_iop_negconvert_data_t
@@ -187,7 +186,7 @@ typedef struct dt_iop_negconvert_gui_data_t
 {
   GtkNotebook *notebook;
   GtkWidget *base[3], *black_density[3], *white_density[3];
-  GtkWidget *base_picker, *range_picker, *wb_picker;
+  GtkWidget *base_picker, *wb_picker;
   GtkWidget *temp, *tint;
   GtkWidget *analyze, *auto_wb;
   // filled by the preview pipe, read by the gui thread, both under the module lock
@@ -567,27 +566,6 @@ static void _apply_base(dt_iop_module_t *self)
   dt_dev_add_history_item(darktable.develop, self, TRUE);
 }
 
-// density range: the area picked should span the thinnest and densest parts of the image
-static void _apply_range(dt_iop_module_t *self)
-{
-  DT_GUARD_GUI_UPDATE();
-  dt_iop_negconvert_gui_data_t *g = self->gui_data;
-  dt_iop_negconvert_params_t *p = self->params;
-
-  for(int c = 0; c < 3; c++)
-  {
-    p->black_density[c] = log10f(p->base[c] / fmaxf(self->picked_color_max[c], THRESHOLD));
-    p->white_density[c] = log10f(p->base[c] / fmaxf(self->picked_color_min[c], THRESHOLD));
-  }
-
-  DT_ENTER_GUI_UPDATE();
-  _set_triplet(g->black_density, p->black_density);
-  _set_triplet(g->white_density, p->white_density);
-  DT_LEAVE_GUI_UPDATE();
-
-  dt_dev_add_history_item(darktable.develop, self, TRUE);
-}
-
 // choose temp and tint so that an area with the given normalized densities comes out neutral
 static void _set_balance(dt_iop_module_t *self, const float x[3])
 {
@@ -653,8 +631,6 @@ void color_picker_apply(dt_iop_module_t *self, GtkWidget *picker, dt_dev_pixelpi
 
   if(picker == g->base_picker)
     _apply_base(self);
-  else if(picker == g->range_picker)
-    _apply_range(self);
   else if(picker == g->wb_picker)
     _apply_wb(self);
   else
@@ -692,8 +668,8 @@ static void _apply_analysis(dt_iop_module_t *self)
   for(int c = 0; c < 3; c++)
   {
     // thin negative (high transmittance) is black, dense (low transmittance) is white
-    const float t_black = _histogram_percentile(g->analysis[c], 1.0f - ANALYSIS_BLACK_PERCENTILE);
-    const float t_white = _histogram_percentile(g->analysis[c], ANALYSIS_WHITE_PERCENTILE);
+    const float t_black = _histogram_percentile(g->analysis[c], 1.0f - 0.01f * p->analyze_black);
+    const float t_white = _histogram_percentile(g->analysis[c], 0.01f * p->analyze_white);
     p->black_density[c] = log10f(p->base[c] / t_black);
     p->white_density[c] = log10f(p->base[c] / t_white);
   }
@@ -801,27 +777,34 @@ void gui_init(dt_iop_module_t *self)
   g->base_picker = dt_color_picker_new(self, DT_COLOR_PICKER_AREA, NULL);
   gtk_widget_set_tooltip_text(g->base_picker, _("pick the unexposed film border"));
   dt_action_define_iop(self, N_("pickers"), N_("film base"), g->base_picker, &dt_action_def_color_picker);
-  g->range_picker = dt_color_picker_new(self, DT_COLOR_PICKER_AREA, NULL);
-  gtk_widget_set_tooltip_text(g->range_picker, _("pick an area covering the image content, from the thinnest "
-                                                 "to the densest part of the negative.\n"
-                                                 "set the film base first"));
-  dt_action_define_iop(self, N_("pickers"), N_("density range"), g->range_picker, &dt_action_def_color_picker);
 
   g->analyze = dt_iop_button_new(self, N_("analyze"), G_CALLBACK(_analyze_clicked), FALSE, 0, 0, NULL, 0, NULL);
   gtk_widget_set_tooltip_text(g->analyze, _("set the density range of every channel from the image itself.\n"
-                                            "the thinnest 1% and densest 1% of each channel become black and white, "
-                                            "which also removes most of the color cast.\n"
-                                            "crop away the film border, sprocket holes and holder first, "
-                                            "otherwise they set the range.\n"
+                                            "the thinnest and densest part of each channel, as set by the percentiles "
+                                            "below, become black and white, which also removes most of the "
+                                            "color cast.\n"
+                                            "the film border, sprocket holes and holder count as image unless "
+                                            "cropped away; raise the black percentile to ignore them.\n"
                                             "the film base does not need to be set for this"));
   dt_gui_box_add(page, g->analyze);
+
+  GtkWidget *w = dt_bauhaus_slider_from_params(self, "analyze_black");
+  dt_bauhaus_slider_set_format(w, "%");
+  gtk_widget_set_tooltip_text(w, _("share of the pixels, from the thinnest end of the negative, that analyze "
+                                   "lets clip to black.\n"
+                                   "raise it to ignore a bright film border or holder"));
+  w = dt_bauhaus_slider_from_params(self, "analyze_white");
+  dt_bauhaus_slider_set_format(w, "%");
+  gtk_widget_set_tooltip_text(w, _("share of the pixels, from the densest end of the negative, that analyze "
+                                   "lets clip to white.\n"
+                                   "raise it to ignore dust and specular highlights"));
 
   dt_gui_box_add(page, dt_ui_section_label_new(C_("section", "film base")), g->base_picker);
   _triplet_slider(self, (const char *[]){ "base[0]", "base[1]", "base[2]" }, g->base,
                   (const char *[]){ N_("film base red"), N_("film base green"), N_("film base blue") },
                   _("transmittance of the unexposed film, as seen by the scanner or camera"));
 
-  dt_gui_box_add(page, dt_ui_section_label_new(C_("section", "density range")), g->range_picker);
+  dt_gui_box_add(page, dt_ui_section_label_new(C_("section", "density range")));
   _triplet_slider(self, (const char *[]){ "black_density[0]", "black_density[1]", "black_density[2]" },
                   g->black_density,
                   (const char *[]){ N_("black density red"), N_("black density green"), N_("black density blue") },
@@ -832,7 +815,7 @@ void gui_init(dt_iop_module_t *self)
                   _("density of the negative that becomes white"));
 
   dt_gui_box_add(page, dt_ui_section_label_new(C_("section", "conversion")));
-  GtkWidget *w = dt_bauhaus_combobox_from_params(self, "film_type");
+  w = dt_bauhaus_combobox_from_params(self, "film_type");
   gtk_widget_set_tooltip_text(w, _(
                                    "color: independent red, green and blue densities\n"
                                    "black and white: only the red channel density is used,\n"
