@@ -25,6 +25,7 @@
 #include "develop/imageop.h"
 #include "develop/imageop_gui.h"
 #include "dtgtk/button.h"
+#include "dtgtk/paint.h"
 #include "gui/accelerators.h"
 #include "gui/gtk.h"
 #include "gui/color_picker_proxy.h"
@@ -244,6 +245,8 @@ typedef struct dt_iop_negconvert_gui_data_t
   GtkWidget *analyze_black, *analyze_white;
   dt_gui_collapsible_section_t density_section;
   GtkWidget *temp, *tint, *auto_density, *shadow_rolloff, *highlight_fade;
+  GtkWidget *show_clipping;
+  gboolean clipping_display; // read by the pipe, under the module lock
   // hue and strength are another view of temp and tint, kept only in the gui
   GtkWidget *wb_box, *hue, *strength;
   GtkNotebook *wb_notebook;
@@ -684,6 +687,36 @@ static void _process_pixel(const dt_iop_negconvert_data_t *const d, const float 
   out[3] = in[3];
 }
 
+// clipping display: where the normalized density of a channel leaves the density range, before temp and tint.
+// past white the clipped channels light up in their own color, white when all three clip; below black the
+// others do, so it shows the complementary color, black when all three clip. the rest is a dimmed gray positive
+static void _clipping_pixel(const dt_iop_negconvert_data_t *const d, const float *const in, float *const out)
+{
+  float above[3], below[3];
+  gboolean any_above = FALSE, any_below = FALSE;
+  for(int c = 0; c < 3; c++)
+  {
+    const float density = log10f(d->base[c] / fmaxf(in[c], THRESHOLD));
+    const float x = (density - d->black_density[c]) * d->inv_range[c];
+    above[c] = x > 1.0f ? 1.0f : 0.0f;
+    below[c] = x < 0.0f ? 0.0f : 1.0f;
+    any_above |= x > 1.0f;
+    any_below |= x < 0.0f;
+  }
+
+  if(any_above)
+    for(int c = 0; c < 3; c++) out[c] = above[c];
+  else if(any_below)
+    for(int c = 0; c < 3; c++) out[c] = below[c];
+  else
+  {
+    _process_pixel(d, in, out);
+    const float gray = 0.05f + 0.25f * _luma(out);
+    for(int c = 0; c < 3; c++) out[c] = gray;
+  }
+  out[3] = in[3];
+}
+
 static void _fill_histogram(uint32_t *const hist, const float *const in, const dt_iop_roi_t *const roi,
                             const int x0, const int y0, const int x1, const int y1)
 {
@@ -741,9 +774,28 @@ void process(dt_iop_module_t *const self, dt_dev_pixelpipe_iop_t *const piece,
   if(self->dev->gui_attached && g && dt_pipe_is_preview(piece->pipe))
     _collect_analysis(self, in, roi_in);
 
-  DT_OMP_FOR()
-  for(size_t k = 0; k < (size_t)roi_out->height * roi_out->width * 4; k += 4)
-    _process_pixel(d, in + k, out + k);
+  gboolean clipping_display = FALSE;
+  if(self->dev->gui_attached && g && dt_pipe_is_full(piece->pipe))
+  {
+    dt_iop_gui_enter_critical_section(self);
+    clipping_display = g->clipping_display;
+    dt_iop_gui_leave_critical_section(self);
+  }
+
+  if(clipping_display)
+  {
+    DT_OMP_FOR()
+    for(size_t k = 0; k < (size_t)roi_out->height * roi_out->width * 4; k += 4)
+      _clipping_pixel(d, in + k, out + k);
+    // show this module's output as it is, without the modules after it
+    piece->pipe->mask_display = DT_DEV_PIXELPIPE_DISPLAY_PASSTHRU;
+  }
+  else
+  {
+    DT_OMP_FOR()
+    for(size_t k = 0; k < (size_t)roi_out->height * roi_out->width * 4; k += 4)
+      _process_pixel(d, in + k, out + k);
+  }
 }
 
 static void _set_triplet(GtkWidget *const widgets[3], const float *const values)
@@ -1009,6 +1061,30 @@ static void _apply_area_wb(dt_iop_module_t *self)
   _set_balance(self, x);
 }
 
+static void _show_clipping_callback(GtkGestureSingle *gesture, int n_press, double x, double y,
+                                    dt_iop_module_t *self)
+{
+  DT_GUARD_GUI_UPDATE();
+  dt_iop_negconvert_gui_data_t *g = self->gui_data;
+  dt_iop_request_focus(self);
+  if(!self->enabled) gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(self->off), TRUE);
+
+  if(self->request_mask_display)
+  {
+    dt_control_log(_("cannot display clipping when the blending mask is displayed"));
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g->show_clipping), FALSE);
+    return;
+  }
+
+  dt_iop_gui_enter_critical_section(self);
+  g->clipping_display = !g->clipping_display;
+  const gboolean clipping_display = g->clipping_display;
+  dt_iop_gui_leave_critical_section(self);
+
+  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g->show_clipping), clipping_display);
+  dt_iop_refresh_center(self);
+}
+
 static GtkWidget *_triplet_slider(dt_iop_module_t *self, const char *const field[3], GtkWidget *out[3],
                                   const char *const label[3], const char *const tooltip)
 {
@@ -1075,6 +1151,19 @@ void gui_init(dt_iop_module_t *self)
                                    "lets clip to white.\n"
                                    "raise it to ignore dust and specular highlights. "
                                    "0 takes the single densest pixel"));
+
+  g->show_clipping = dt_iop_togglebutton_new(self, N_("density"), N_("display clipping"), NULL,
+                                             G_CALLBACK(_show_clipping_callback), FALSE, 0, 0,
+                                             dtgtk_cairo_paint_showmask, NULL);
+  dt_gui_add_class(g->show_clipping, "dt_transparent_background");
+  dt_gui_add_class(g->show_clipping, "dt_bauhaus_alignment");
+  gtk_widget_set_tooltip_text(g->show_clipping, _("show which pixels the density range clips, on a dimmed gray image.\n"
+                                                  "past white the clipping channels light up in their own color, "
+                                                  "white where all three clip; below black the image shows the "
+                                                  "complementary color, black where all three clip.\n"
+                                                  "use it while setting the percentiles, white clip and contrast. "
+                                                  "the highlight rolloff and fade still soften what clips past white"));
+  dt_gui_box_add(page, dt_gui_hbox(dt_gui_expand(dt_ui_label_new(_("display clipping"))), g->show_clipping));
 
   GtkWidget *density_box = dt_gui_vbox();
   dt_gui_box_add(page, density_box);
@@ -1404,6 +1493,23 @@ void gui_update(dt_iop_module_t *const self)
   _update_profile_sensitivity(self);
   _update_hue_strength(self);
   dt_iop_color_picker_reset(self, TRUE);
+}
+
+void gui_focus(dt_iop_module_t *self, const gboolean in)
+{
+  dt_iop_negconvert_gui_data_t *g = self->gui_data;
+  if(in || !g) return;
+
+  // the display is a tool for the module in focus, like a mask display
+  dt_iop_gui_enter_critical_section(self);
+  const gboolean was_shown = g->clipping_display;
+  g->clipping_display = FALSE;
+  dt_iop_gui_leave_critical_section(self);
+
+  DT_ENTER_GUI_UPDATE();
+  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g->show_clipping), FALSE);
+  DT_LEAVE_GUI_UPDATE();
+  if(was_shown) dt_dev_reprocess_center(self->dev, self->iop_order);
 }
 
 void gui_reset(dt_iop_module_t *self)
