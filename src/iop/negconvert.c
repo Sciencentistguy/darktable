@@ -165,6 +165,7 @@ typedef struct dt_iop_negconvert_params_t
   float shadow_rolloff;                          // $MIN: 0.0 $MAX: 100.0 $DEFAULT: 25.0 $DESCRIPTION: "shadow rolloff"
   float analyze_black;                           // $MIN: 0.01 $MAX: 20.0 $SOFT_MAX: 5.0 $DEFAULT: 1.0 $DESCRIPTION: "black percentile"
   float analyze_white;                           // $MIN: 0.01 $MAX: 20.0 $SOFT_MAX: 5.0 $DEFAULT: 1.0 $DESCRIPTION: "white percentile"
+  float contrast;                                // $MIN: -100.0 $MAX: 100.0 $DEFAULT: 0.0 $DESCRIPTION: "contrast"
 } dt_iop_negconvert_params_t;
 
 typedef struct dt_iop_negconvert_data_t
@@ -311,6 +312,11 @@ void commit_params(dt_iop_module_t *self, dt_iop_params_t *p1, dt_dev_pixelpipe_
     const float range = hi[c] - lo[c];
     lo[c] += p->black_clip * 0.01f * range;
     hi[c] -= p->white_clip * 0.01f * range;
+    // contrast steepens the inversion curve about the middle of the density range; the ends move with it
+    const float squeeze = exp2f(-p->contrast * 0.01f);
+    const float mid = 0.5f * (lo[c] + hi[c]);
+    lo[c] = mid + (lo[c] - mid) * squeeze;
+    hi[c] = mid + (hi[c] - mid) * squeeze;
     d->black_density[c] = lo[c];
     d->inv_range[c] = 1.0f / fmaxf(hi[c] - lo[c], 0.01f);
   }
@@ -891,6 +897,12 @@ void gui_init(dt_iop_module_t *self)
 
   // page TONE
   page = self->widget = dt_ui_notebook_page(g->notebook, N_("tone"), NULL);
+  w = dt_bauhaus_slider_from_params(self, "contrast");
+  gtk_widget_set_tooltip_text(w, _("steepen or flatten the inversion curve about the middle of the density range.\n"
+                                   "unlike the looks, this changes the conversion itself: it scales the density "
+                                   "range before the tone profile, so everything after it responds to the new "
+                                   "gradient. at +100 the gradient is doubled and the outer quarter of the range "
+                                   "is pushed past black and white; at -100 it is halved"));
   g->wb_picker = dt_color_picker_new(self, DT_COLOR_PICKER_AREA, NULL);
   gtk_widget_set_tooltip_text(g->wb_picker, _("pick an area that should be neutral gray in the positive, "
                                               "such as a gray card, a white shirt or a concrete wall.\n"
