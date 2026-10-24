@@ -70,7 +70,7 @@
  *   9. saturation
  *  10. look (contrast, saturation and a warm or cool shift), then toning
  *  11. lab fade and lab glow
- *  12. shadow rolloff
+ *  12. shadow rolloff (linear tone profile only)
  *  13. highlight fade (color protected only): channels past white fade to neutral
  *  14. highlight rolloff
  *  15. clip at white, keeping hue (color protected) or per channel
@@ -629,7 +629,8 @@ static void _process_pixel(const dt_iop_negconvert_data_t *const d, const float 
   const float glow = p->lab_glow * 0.002f * _smoothstep(0.6f, 1.0f, L);
   for_each_channel(c) y[c] = fade + y[c] * (1.0f - fade) + glow;
 
-  if(p->shadow_rolloff > 0.0f)
+  // the other profiles end flat at black, and the toe would only lift it, with its slider hidden
+  if(p->tone_profile == DT_NEGCONVERT_TONE_LINEAR && p->shadow_rolloff > 0.0f)
   {
     // the toe is the shoulder mirrored about mid gray, so it approaches 0 and never goes negative
     const float knee = 0.005f * p->shadow_rolloff;
