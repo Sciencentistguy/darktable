@@ -1062,38 +1062,6 @@ void gui_init(dt_iop_module_t *self)
 
   // page TONE
   page = self->widget = dt_ui_notebook_page(g->notebook, N_("tone"), NULL);
-  g->wb_picker = dt_color_picker_new(self, DT_COLOR_PICKER_AREA, NULL);
-  gtk_widget_set_tooltip_text(g->wb_picker, _("pick an area that should be neutral gray in the positive, "
-                                              "such as a gray card, a white shirt or a concrete wall.\n"
-                                              "sets temp and tint so the median of each channel in the area has no color cast, "
-                                              "so dust and stray pixels in it do not matter.\n"
-                                              "set the film base and density range first, "
-                                              "as they define the response the balance is computed from"));
-  dt_action_define_iop(self, N_("pickers"), N_("white balance"), g->wb_picker, &dt_action_def_color_picker);
-  g->auto_wb = dt_iop_button_new(self, N_("auto white balance"), G_CALLBACK(_auto_wb_clicked), FALSE, 0, 0, NULL, 0, NULL);
-  gtk_widget_set_tooltip_text(g->auto_wb, _("set temp and tint so the median of each channel is neutral.\n"
-                                            "this assumes the scene averages out to gray, so it fails on images "
-                                            "dominated by one color: use the picker on a known neutral there.\n"
-                                            "it uses the area last picked with the density range or white balance picker; "
-                                            "without one, the whole frame, so crop away the film border first"));
-  dt_gui_box_add(page, dt_ui_section_label_new(C_("section", "white balance")), g->wb_picker, g->auto_wb);
-  g->temp = w = dt_bauhaus_slider_from_params(self, "temp");
-  dt_bauhaus_slider_set_soft_range(w, -30.0f, 30.0f);
-  dt_bauhaus_slider_set_stop(w, 0.0, 0.3, 0.3, 1);
-  dt_bauhaus_slider_set_stop(w, 0.5, 0.5, 0.5, 0.5);
-  dt_bauhaus_slider_set_stop(w, 1.0, 1, 1, 0.25);
-  gtk_widget_set_tooltip_text(w, _(
-                                   "shifts the color balance along the blue/yellow axis\n"
-                                   "positive values warm the image, negative values cool it\n"
-                                   "the film base picker neutralizes the orange mask; use this for the rest"));
-  g->tint = w = dt_bauhaus_slider_from_params(self, "tint");
-  dt_bauhaus_slider_set_soft_range(w, -30.0f, 30.0f);
-  dt_bauhaus_slider_set_stop(w, 0.0, 0.25, 1, 0.25);
-  dt_bauhaus_slider_set_stop(w, 0.5, 0.5, 0.5, 0.5);
-  dt_bauhaus_slider_set_stop(w, 1.0, 1, 0.25, 1);
-  gtk_widget_set_tooltip_text(w, _(
-                                   "shifts the color balance along the green/magenta axis\n"
-                                   "positive values add magenta, negative values add green"));
   dt_gui_box_add(page, dt_ui_section_label_new(C_("section", "tone")));
   w = dt_bauhaus_slider_from_params(self, "contrast");
   gtk_widget_set_tooltip_text(w, _("steepen or flatten the inversion curve about the middle of the density range.\n"
@@ -1147,6 +1115,38 @@ void gui_init(dt_iop_module_t *self)
 
   // page COLOR
   page = self->widget = dt_ui_notebook_page(g->notebook, N_("color"), NULL);
+  g->wb_picker = dt_color_picker_new(self, DT_COLOR_PICKER_AREA, NULL);
+  gtk_widget_set_tooltip_text(g->wb_picker, _("pick an area that should be neutral gray in the positive, "
+                                              "such as a gray card, a white shirt or a concrete wall.\n"
+                                              "sets temp and tint so the median of each channel in the area has no color cast, "
+                                              "so dust and stray pixels in it do not matter.\n"
+                                              "set the film base and density range first, "
+                                              "as they define the response the balance is computed from"));
+  dt_action_define_iop(self, N_("pickers"), N_("white balance"), g->wb_picker, &dt_action_def_color_picker);
+  g->auto_wb = dt_iop_button_new(self, N_("auto white balance"), G_CALLBACK(_auto_wb_clicked), FALSE, 0, 0, NULL, 0, NULL);
+  gtk_widget_set_tooltip_text(g->auto_wb, _("set temp and tint so the median of each channel is neutral.\n"
+                                            "this assumes the scene averages out to gray, so it fails on images "
+                                            "dominated by one color: use the picker on a known neutral there.\n"
+                                            "it uses the area last picked with the density or white balance picker; "
+                                            "without one, the whole frame, so crop away the film border first"));
+  dt_gui_box_add(page, dt_ui_section_label_new(C_("section", "white balance")), g->wb_picker, g->auto_wb);
+  g->temp = w = dt_bauhaus_slider_from_params(self, "temp");
+  dt_bauhaus_slider_set_soft_range(w, -30.0f, 30.0f);
+  dt_bauhaus_slider_set_stop(w, 0.0, 0.3, 0.3, 1);
+  dt_bauhaus_slider_set_stop(w, 0.5, 0.5, 0.5, 0.5);
+  dt_bauhaus_slider_set_stop(w, 1.0, 1, 1, 0.25);
+  gtk_widget_set_tooltip_text(w, _(
+                                   "shifts the color balance along the blue/yellow axis\n"
+                                   "positive values warm the image, negative values cool it\n"
+                                   "the film base picker neutralizes the orange mask; use this for the rest"));
+  g->tint = w = dt_bauhaus_slider_from_params(self, "tint");
+  dt_bauhaus_slider_set_soft_range(w, -30.0f, 30.0f);
+  dt_bauhaus_slider_set_stop(w, 0.0, 0.25, 1, 0.25);
+  dt_bauhaus_slider_set_stop(w, 0.5, 0.5, 0.5, 0.5);
+  dt_bauhaus_slider_set_stop(w, 1.0, 1, 0.25, 1);
+  gtk_widget_set_tooltip_text(w, _(
+                                   "shifts the color balance along the green/magenta axis\n"
+                                   "positive values add magenta, negative values add green"));
   dt_gui_box_add(page, dt_ui_section_label_new(C_("section", "ranges")));
   w = dt_bauhaus_slider_from_params(self, "shadows_range");
   gtk_widget_set_tooltip_text(w, _(
