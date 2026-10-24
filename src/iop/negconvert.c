@@ -344,9 +344,12 @@ void commit_params(dt_iop_module_t *self, dt_iop_params_t *p1, dt_dev_pixelpipe_
 
   const float temp = p->temp * BALANCE_SCALE;
   const float tint = p->tint * BALANCE_SCALE;
-  d->density_shift[0] = temp;
-  d->density_shift[1] = -tint;
-  d->density_shift[2] = -temp;
+  // the common offset cancels the shift's effect on luminance. without it tint alone moves green, which
+  // carries most of the luminance, and the large tints of a badly shifted negative left the image dark
+  const float offset = 0.7152f * tint - (0.2126f - 0.0722f) * temp;
+  d->density_shift[0] = temp + offset;
+  d->density_shift[1] = -tint + offset;
+  d->density_shift[2] = -temp + offset;
   d->density_shift[3] = 0.0f;
 
   // exponential, so the gains stay positive over the whole slider range
