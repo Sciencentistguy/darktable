@@ -856,8 +856,10 @@ void gui_init(dt_iop_module_t *self)
                   (const char *[]){ N_("film base red"), N_("film base green"), N_("film base blue") },
                   _("transmittance of the unexposed film, as seen by the scanner or camera"));
 
+  GtkWidget *density_box = dt_gui_vbox();
+  dt_gui_box_add(page, density_box);
   dt_gui_new_collapsible_section(&g->density_section, "plugins/darkroom/negconvert/expand_density_range",
-                                 _("density range"), GTK_BOX(page), DT_ACTION(self));
+                                 _("density range"), GTK_BOX(density_box), DT_ACTION(self));
   self->widget = GTK_WIDGET(g->density_section.container);
 
   g->analyze_black = dt_bauhaus_slider_from_params(self, "analyze_black");
