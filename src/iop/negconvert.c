@@ -613,7 +613,7 @@ static void _process_pixel(const dt_iop_negconvert_data_t *const d, const float 
     // past white the ratio between the channels is mostly scan noise and the uneven shoulders of the dye
     // layers, and keeping it gives blown areas a saturated, speckled color. fade it out, as a print goes white
     const float peak = fmaxf(y[0], fmaxf(y[1], y[2]));
-    const float neutral = _smoothstep(1.0f, 2.0f, peak);
+    const float neutral = _smoothstep(1.0f, 1.5f, peak);
     for_each_channel(c) y[c] += (peak - y[c]) * neutral;
   }
 
