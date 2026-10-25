@@ -1,0 +1,95 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 7.0-c000 1.000000, 0000/00/00-00:00:00        ">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about=""
+    xmlns:tiff="http://ns.adobe.com/tiff/1.0/"
+    xmlns:exif="http://ns.adobe.com/exif/1.0/"
+    xmlns:aux="http://ns.adobe.com/exif/1.0/aux/"
+    xmlns:exifEX="http://cipa.jp/exif/1.0/"
+    xmlns:xmp="http://ns.adobe.com/xap/1.0/"
+    xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/"
+    xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/"
+    xmlns:stEvt="http://ns.adobe.com/xap/1.0/sType/ResourceEvent#"
+    xmlns:dc="http://purl.org/dc/elements/1.1/"
+    xmlns:crd="http://ns.adobe.com/camera-raw-defaults/1.0/"
+    xmlns:xmpDM="http://ns.adobe.com/xmp/1.0/DynamicMedia/"
+    xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+   tiff:Make="Canon"
+   tiff:Model="Canon EOS 40D"
+   tiff:Orientation="1"
+   tiff:ImageWidth="3888"
+   tiff:ImageLength="2592"
+   exif:ExifVersion="0221"
+   exif:ExposureTime="1/200"
+   exif:ShutterSpeedValue="7643856/1000000"
+   exif:FNumber="8/1"
+   exif:ApertureValue="6/1"
+   exif:ExposureProgram="1"
+   exif:ExposureBiasValue="0/1"
+   exif:MaxApertureValue="3/1"
+   exif:MeteringMode="5"
+   exif:FocalLength="100/1"
+   exif:CustomRendered="0"
+   exif:ExposureMode="1"
+   exif:WhiteBalance="1"
+   exif:SceneCaptureType="0"
+   exif:FocalPlaneXResolution="3888000/876"
+   exif:FocalPlaneYResolution="2592000/583"
+   exif:FocalPlaneResolutionUnit="2"
+   exif:DateTimeOriginal="2007-09-11T13:53:33.18"
+   exif:PixelXDimension="3888"
+   exif:PixelYDimension="2592"
+   aux:SerialNumber="420113346"
+   aux:LensInfo="100/1 100/1 0/0 0/0"
+   aux:Lens="EF100mm f/2.8 Macro USM"
+   aux:LensID="190"
+   aux:ImageNumber="0"
+   aux:ApproximateFocusDistance="326/100"
+   aux:FlashCompensation="0/1"
+   aux:Firmware="1.0.3"
+   exifEX:LensModel="EF100mm f/2.8 Macro USM"
+   xmp:ModifyDate="2007-09-11T13:53:33.18"
+   xmp:CreateDate="2007-09-11T13:53:33.18"
+   xmp:MetadataDate="2026-10-25T17:53:30Z"
+   photoshop:DateCreated="2007-09-11T13:53:33.18"
+   photoshop:SidecarForExtension="CR2"
+   photoshop:EmbeddedXMPDigest="00000000000000000000000000000000"
+   xmpMM:DocumentID="366A5DDEFB29E55B982E040CAF1A4DD3"
+   xmpMM:PreservedFileName="01-baseline.cr2"
+   xmpMM:OriginalDocumentID="366A5DDEFB29E55B982E040CAF1A4DD3"
+   xmpMM:InstanceID="xmp.iid:6391fe1b-eea2-4da7-bca1-d722e76097cf"
+   dc:format="image/x-canon-cr2"
+   crd:CameraProfile="Camera Standard"
+   crd:LookName=""
+   xmpDM:pick="0"
+   crs:CropTop="0"
+   crs:CropLeft="0"
+   crs:CropBottom="1"
+   crs:CropRight="1"
+   crs:CropAngle="0"
+   crs:CropConstrainToWarp="0"
+   crs:CropConstrainToUnitSquare="1"
+   crs:RawFileName="01-baseline.cr2">
+   <exif:ISOSpeedRatings>
+    <rdf:Seq>
+     <rdf:li>1600</rdf:li>
+    </rdf:Seq>
+   </exif:ISOSpeedRatings>
+   <exif:Flash
+    exif:Fired="False"
+    exif:Return="0"
+    exif:Mode="2"
+    exif:Function="False"
+    exif:RedEyeMode="False"/>
+   <xmpMM:History>
+    <rdf:Seq>
+     <rdf:li
+      stEvt:action="saved"
+      stEvt:instanceID="xmp.iid:6391fe1b-eea2-4da7-bca1-d722e76097cf"
+      stEvt:when="2026-10-25T17:53:30Z"
+      stEvt:softwareAgent="Adobe Photoshop Lightroom Classic 15.6 (Macintosh)"
+      stEvt:changed="/metadata"/>
+    </rdf:Seq>
+   </xmpMM:History>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

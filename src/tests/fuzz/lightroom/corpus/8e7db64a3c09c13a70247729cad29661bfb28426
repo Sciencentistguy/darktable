@@ -1,0 +1,161 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="Adobe XMP Core 7.0-c000 1.000000, 0000/00/00-00:00:00        ">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about=""
+    xmlns:tiff="http://ns.adobe.com/tiff/1.0/"
+    xmlns:exif="http://ns.adobe.com/exif/1.0/"
+    xmlns:aux="http://ns.adobe.com/exif/1.0/aux/"
+    xmlns:exifEX="http://cipa.jp/exif/1.0/"
+    xmlns:xmp="http://ns.adobe.com/xap/1.0/"
+    xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/"
+    xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/"
+    xmlns:stEvt="http://ns.adobe.com/xap/1.0/sType/ResourceEvent#"
+    xmlns:dc="http://purl.org/dc/elements/1.1/"
+    xmlns:crd="http://ns.adobe.com/camera-raw-defaults/1.0/"
+    xmlns:xmpDM="http://ns.adobe.com/xmp/1.0/DynamicMedia/"
+    xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+   tiff:Make="Canon"
+   tiff:Model="Canon EOS 40D"
+   tiff:Orientation="0"
+   tiff:ImageWidth="3888"
+   tiff:ImageLength="2592"
+   exif:ExifVersion="0221"
+   exif:ExposureTime="1/200"
+   exif:ShutterSpeedValue="7643856/1000000"
+   exif:FNumber="8/1"
+   exif:ApertureValue="6/1"
+   exif:ExposureProgram="1"
+   exif:ExposureBiasValue="0/1"
+   exif:MaxApertureValue="3/1"
+   exif:MeteringMode="5"
+   exif:FocalLength="100/1"
+   exif:CustomRendered="0"
+   exif:ExposureMode="1"
+   exif:WhiteBalance="1"
+   exif:SceneCaptureType="0"
+   exif:FocalPlaneXResolution="3888000/876"
+   exif:FocalPlaneYResolution="2592000/583"
+   exif:FocalPlaneResolutionUnit="2"
+   exif:DateTimeOriginal="2007-09-11T13:53:33.18"
+   exif:PixelXDimension="3888"
+   exif:PixelYDimension="2592"
+   aux:SerialNumber="420113346"
+   aux:LensInfo="100/1 100/1 0/0 0/0"
+   aux:Lens="EF100mm f/2.8 Macro USM"
+   aux:LensID="190"
+   aux:ImageNumber="0"
+   aux:ApproximateFocusDistance="326/100"
+   aux:FlashCompensation="0/1"
+   aux:Firmware="1.0.3"
+   exifEX:LensModel="EF100mm f/2.8 Macro USM"
+   xmp:ModifyDate="2007-09-11T13:53:33.18"
+   xmp:CreateDate="2007-09-11T13:53:33.18"
+   xmp:MetreenHueLo="40"
+   crs:DefringeGreenHueHi="60"
+   crs:PerspectiveUpright="0"
+   crs:PerspectiveV="0"
+   crs:ConvertToGrayscale="False"
+   crs:OverrideLookVignette="False"
+   crs:ToneCurveName2012="Linear"
+   crs:CameraProfile="Camera Standard"
+   crs:CameraProfileDigest="F0D06C559756F7BD7331A9DB44BF84DD"
+   crs:HasSettings="True"
+   crs:AlreadyApplied="False"
+   crs:RawFileName="21-spot-removal.cr2">
+   <exif:ISOSpeedRatings>
+    <rdf:Seq>
+     <rdf:li>1600</rdf:li>
+    </rdf:Seq>
+   </exif:ISOSpeedRatings>
+   <exif:Flash
+    exif:Fired="False"
+    exif:Return="0"
+    exif:Mode="2"
+    exif:Function="False"
+    exif:RedEyeMode="False"/>
+   <xmpMM:History>
+    <rdf:Seq>
+     <rdf:li
+      stEvt:action="saved"
+      stEvt:instanceID="xmp.iid:d0a96bf1-4ce2-43aa-9546-da3a4d253252"
+      stEvt:when="2026-10-25T22:58:19Z"
+      stEvt:softwareAgent="Adobe Photoshop Lightroom Classic 15.6 (Macintosh)"
+      stEvt:changed="/metadata"/>
+    </rdf:Seq>
+   </xmpMM:History>
+   <crs:ToneCurvePV2012>
+    <rdf:Seq>
+     <rdf:li>0, 0</rdf:li>
+     <rdf:li>255, 255</rdf:li>
+    </rdf:Seq>
+   </crs:ToneCurvePV2012>
+   <crs:ToneCurvePV2012Red>
+    <rdf:Seq>
+     <rdf:li>0, 0</rdf:li>
+     <rdf:li>255, 255</rdf:li>
+    </rdf:Seq>
+   </crs:ToneCurvePV2012Red>
+   <crs:ToneCurvePV2012Green>
+    <rdf:Seq>
+     <rdf:li>0, 0</rdf:li>
+     <rdf:li>255, 255</rdf:li>
+    </rdf:Seq>
+   </crs:ToneCurvePV2012Green>
+   <crs:ToneCurvePV2012Blue>
+    <rdf:Seq>
+     <rdf:li>0, 0</rdf:li>
+     <rdf:li>255, 255</rdf:li>
+    </rdf:Seq>
+   </crs:ToneCurvePV2012Blue>
+   <crs:PointColors>
+    <rdf:Seq>
+     <rdf:li>-1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000</rdf:li>
+    </rdf:Seq>
+   </crs:PointColors>
+   <crs:ColorVariance>
+    <rdf:Seq>
+     <rdf:li>-50.000000</rdf:li>
+    </rdf:Seq>
+   </crs:ColorVariance>
+   <crs:RetouchAreas>
+    <rdf:Seq>
+     <rdf:li>
+      <rdf:Description
+       crs:SpotType="clone"
+       crs:SourceState="sourceAutoComputed"
+       crs:Method="gaussian"
+       crs:HealVersion="2"
+       crs:subject="0.586854"
+       crs:creator="0.815898"
+       crs:Opacity="1"
+       crs:Feather="0.5"
+       crs:Seed="2">
+      <crs:Masks>
+       <rdf:Seq>
+        <rdf:li
+         crs:What="Mask/Ellipse"
+         crsToneCurveve="true"
+         crs:MaskBlendMode="0"
+         crs:MaskInverted="false"
+         crs:MaskSyncID="FBA2BBB6320747368C87A56716B7E615"
+         crs:MaskValue="1"
+         crs:X="0.575023"
+         crs:Y="0.77616"
+         crs:SizzX="0.009265"
+         crs:SizeY="0.009265"
+         crs:Alpha="0"
+         crs:CenterValue="1"
+         crs:PerimeterValue="0"/>
+       </rdf:Seq>
+      </crs:Masks>
+      </rdf:Description>
+     </rdf:li>
+    </rdf:Seq>
+   </crs:RetouchAreas>
+   <crs:RetouchInfo>
+    <rdf:Seq>
+     <rdf:li>centerX = 0.575023, centerY = 0.776160, radius = 0.009265, sourceState = sourceAutoComputed, sourceX = 0.586854, sourceY = 0.815898, spotType = clone</rdf:li>
+    </rdf:Seq>
+   </crs:RetouchInfo>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>
