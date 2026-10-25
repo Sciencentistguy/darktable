@@ -1525,29 +1525,18 @@ static dt_masks_form_t *_spot_to_brush(const dt_image_t *img, const lr_spot_t *s
 }
 
 // retouch takes its shapes from the masks history, not from its params: a
-// clone group of one circle or brush per spot, recorded under the retouch
-// history num
-static void _add_retouch_hist(const dt_develop_t *dev, const dt_imgid_t imgid, const lr_data_t *data,
-                              char *imported, const size_t imported_len, int *import_count)
+// clone group of one circle or brush per spot. Fills pr and returns the
+// shapes, the group last, or NULL for an image without a size
+static GList *_lr_retouch_to_dt(const dt_image_t *img, const lr_data_t *data, dt_iop_retouch_params_v3_t *pr)
 {
-  const dt_image_t *img = &dev->image_storage;
   const float cw = img->width - img->crop_x - img->crop_right;
   const float ch = img->height - img->crop_y - img->crop_bottom;
-  if(cw <= 0.0f || ch <= 0.0f) return;
+  if(cw <= 0.0f || ch <= 0.0f) return NULL;
   // a Lightroom spot radius is relative to the long side, a circle radius or
   // brush border to the short side of the whole sensor
   const float rscale = MAX(cw, ch) / MIN(img->width, img->height);
 
-  dt_iop_retouch_params_v3_t pr = { .algorithm = DT_IOP_RETOUCH_HEAL,
-                                 .preview_levels = { -3.0f, 0.0f, 3.0f },
-                                 .blur_radius = 10.0f,
-                                 .max_heal_iter = 2000 };
-  const dt_iop_module_t *retouch = dt_iop_get_module_by_op_priority(dev->iop, "retouch", 0);
-  if(retouch && retouch->params_size == sizeof(pr))
-    memcpy(&pr, retouch->default_params, sizeof(pr));
-
   dt_masks_form_t *grp = dt_masks_create(DT_MASKS_GROUP | DT_MASKS_CLONE);
-  snprintf(grp->name, sizeof(grp->name), _("group `%s'"), dt_iop_get_localized_name("retouch"));
   GList *forms = NULL;
   int n_circles = 0, n_brushes = 0;
 
@@ -1589,13 +1578,32 @@ static void _add_retouch_hist(const dt_develop_t *dev, const dt_imgid_t imgid, c
     grpt->group_opacity = 1.0f;
     grp->points = g_list_append(grp->points, grpt);
 
-    pr.rt_forms[k] = (dt_iop_retouch_form_data_v3_t){ .formid = form->formid,
+    pr->rt_forms[k] = (dt_iop_retouch_form_data_v3_t){ .formid = form->formid,
                                                    .algorithm = s->clone ? DT_IOP_RETOUCH_CLONE
                                                                          : DT_IOP_RETOUCH_HEAL,
-                                                   .blur_radius = pr.blur_radius,
+                                                   .blur_radius = pr->blur_radius,
                                                    .distort_mode = 2 };
   }
-  forms = g_list_append(forms, grp);
+  return g_list_append(forms, grp);
+}
+
+// records the shapes under the retouch history num
+static void _add_retouch_hist(const dt_develop_t *dev, const dt_imgid_t imgid, const lr_data_t *data,
+                              char *imported, const size_t imported_len, int *import_count)
+{
+  dt_iop_retouch_params_v3_t pr = { .algorithm = DT_IOP_RETOUCH_HEAL,
+                                 .preview_levels = { -3.0f, 0.0f, 3.0f },
+                                 .blur_radius = 10.0f,
+                                 .max_heal_iter = 2000 };
+  const dt_iop_module_t *retouch = dt_iop_get_module_by_op_priority(dev->iop, "retouch", 0);
+  if(retouch && retouch->params_size == sizeof(pr))
+    memcpy(&pr, retouch->default_params, sizeof(pr));
+
+  GList *forms = _lr_retouch_to_dt(&dev->image_storage, data, &pr);
+  if(!forms) return;
+
+  dt_masks_form_t *grp = g_list_last(forms)->data;
+  snprintf(grp->name, sizeof(grp->name), _("group `%s'"), dt_iop_get_localized_name("retouch"));
 
   const int32_t num = _add_hist_with_mask(imgid, "retouch", (dt_iop_params_t *)&pr, sizeof(pr), imported,
                                           imported_len, LRDT_RETOUCH_VERSION, import_count, grp->formid);
@@ -1603,6 +1611,290 @@ static void _add_retouch_hist(const dt_develop_t *dev, const dt_imgid_t imgid, c
     dt_masks_write_masks_history_item(imgid, num, l->data);
 
   g_list_free_full(forms, (GDestroyNotify)dt_masks_free_form);
+}
+
+// Lightroom leaves settings at their defaults out of the XMP
+static void _lr_data_init(lr_data_t *data)
+{
+  memset(data, 0, sizeof(*data));
+
+  data->has_crop = FALSE;
+  data->has_flip = FALSE;
+  data->has_exposure = FALSE;
+  data->has_vignette = FALSE;
+  data->has_grain = FALSE;
+  data->n_pts = 0;
+  // Lightroom's defaults, which it leaves out of the XMP
+  data->ptc_split[0] = 0.25f;
+  data->ptc_split[1] = 0.50f;
+  data->ptc_split[2] = 0.75f;
+  data->has_colorzones = FALSE;
+  data->has_splittoning = FALSE;
+  data->pst.balance = lr2dt_splittoning_balance(0.0f);
+  data->has_bilat = FALSE;
+  data->has_tags = FALSE;
+  data->rating = 0;
+  data->has_rating = FALSE;
+  data->lat = NAN;
+  data->lon = NAN;
+  data->lat_ref = NAN;
+  data->lon_ref = NAN;
+  data->has_gps = FALSE;
+  data->color = 0;
+  data->has_colorlabel = FALSE;
+  data->fratio = NAN;                // until the crop sets it
+  data->crop_roundness = NAN;        // from lightroom
+  data->vignette_midpoint = 50.0f;   // Lightroom's defaults
+  data->vignette_feather = 50.0f;
+  data->iwidth = 0;
+  data->iheight = 0;                 // image width / height
+  data->orientation = EXIF_ORIENTATION_NONE;
+}
+
+// collects the settings of every namespace Lightroom writes, in either of
+// its layouts, into data
+static void _lr_parse(const dt_develop_t *dev, xmlDocPtr doc, xmlXPathContextPtr xpathCtx,
+                      const dt_imgid_t imgid, lr_data_t *data)
+{
+  // record the name-spaces needed for the parsing
+  xmlXPathRegisterNs
+    (xpathCtx,
+     BAD_CAST "crs",
+     BAD_CAST "http://ns.adobe.com/camera-raw-settings/1.0/");
+  xmlXPathRegisterNs
+    (xpathCtx,
+     BAD_CAST "dc",
+     BAD_CAST "http://purl.org/dc/elements/1.1/");
+  xmlXPathRegisterNs
+    (xpathCtx,
+     BAD_CAST "tiff",
+     BAD_CAST "http://ns.adobe.com/tiff/1.0/");
+  xmlXPathRegisterNs
+    (xpathCtx,
+     BAD_CAST "xmp",
+     BAD_CAST "http://ns.adobe.com/xap/1.0/");
+  xmlXPathRegisterNs
+    (xpathCtx,
+     BAD_CAST "exif",
+     BAD_CAST "http://ns.adobe.com/exif/1.0/");
+  xmlXPathRegisterNs
+    (xpathCtx,
+     BAD_CAST "lr",
+     BAD_CAST "http://ns.adobe.com/lightroom/1.0/");
+  xmlXPathRegisterNs
+    (xpathCtx,
+     BAD_CAST "rdf",
+     BAD_CAST "http://www.w3.org/1999/02/22-rdf-syntax-ns#");
+
+  // All prefixes to parse from the XMP document
+  static char *names[] = { "crs", "dc", "tiff", "xmp", "exif", "lr", NULL };
+
+  for(int i=0; names[i]!=NULL; i++)
+    {
+      char expr[50];
+
+      /* Lr 7.0 CC (nodes) */
+      snprintf(expr, sizeof(expr), "//%s:*", names[i]);
+      _handle_xpath(dev, doc, imgid, xpathCtx, (const xmlChar *)expr, data);
+
+      /* Lr up to 6.0 (attributes) */
+      snprintf(expr, sizeof(expr), "//@%s:*", names[i]);
+      _handle_xpath(dev, doc, imgid, xpathCtx, (const xmlChar *)expr, data);
+    }
+}
+
+// fills the vignette params from Lightroom's post-crop vignette, after
+// the crop has set data->fratio
+static void _lr_vignette_to_dt(lr_data_t *data)
+{
+  data->pv.autoratio = FALSE;
+  data->pv.dithering = DITHER_8BIT;
+  data->pv.center.x = 0.0;
+  data->pv.center.y = 0.0;
+  data->pv.shape = 1.0;
+  data->pv.falloff_scale = lr2dt_vignette_falloff(data->vignette_feather);
+  // each step of the midpoint moves the falloff out by 0.576%
+  data->pv.scale = lr2dt_vignette_center(data->vignette_feather)
+                   + 0.576f * (data->vignette_midpoint - 50.0f) - data->pv.falloff_scale / 2.0f;
+
+  // the vignette runs after crop and flip, so it takes the shape of the
+  // cropped frame, upright. Without ImageWidth/ImageLength, which only
+  // a future Lightroom might leave out, there is no shape to follow
+  float frame_ratio = 1.0f;
+  if(data->has_crop && isfinite(data->fratio) && data->fratio > 0.0f)
+    frame_ratio = data->fratio;
+  else if(data->iwidth > 0 && data->iheight > 0)
+  {
+    frame_ratio = (float)data->iwidth / (float)data->iheight;
+    if(dt_image_orientation_to_flip_bits(data->orientation) & ORIENTATION_SWAP_XY)
+      frame_ratio = 1.0f / frame_ratio;
+  }
+  // the module takes a width/height ratio r up to 1 as is, and above 1 as
+  // 2 - 1/r; either way its scale is along the frame's long side
+  data->pv.whratio = frame_ratio <= 1.0f ? frame_ratio : 2.0f - 1.0f / frame_ratio;
+
+  //  Adjust scale and ratio based on the roundness. On Lightroom changing
+  //  the roundness change the width and the height of the vignette.
+
+  if(data->crop_roundness > 0)
+  {
+    float newratio = data->pv.whratio - (data->pv.whratio - 1) * (data->crop_roundness / 100.0);
+    float dscale = (1 - (newratio / data->pv.whratio)) / 2.0;
+
+    data->pv.scale -= dscale * 100.0;
+    data->pv.whratio = newratio;
+  }
+}
+
+// converts Lightroom's crop, given in sensor orientation, into crop params
+// and the ashift params that apply its straightening angle
+static void _lr_crop_to_dt(lr_data_t *data)
+{
+  double rangle;
+  double cx, cw, cy, ch;
+  double new_width, new_height;
+  dt_image_orientation_t orientation = dt_image_orientation_to_flip_bits(data->orientation);
+
+  // ashift runs before flip in the pipe, so it rotates in sensor
+  // orientation, the same space Lightroom's CropAngle is expressed in
+  if(data->pas.rotation != 0.0f)
+  {
+    data->pas.f_length = 28.0f;
+    data->pas.crop_factor = 1.0f;
+    data->pas.orthocorr = 100.0f;
+    data->pas.aspect = 1.0f;
+    data->pas.mode = ASHIFT_MODE_GENERIC;
+    data->pas.cropmode = ASHIFT_CROP_OFF; // the crop module below does the cropping
+    data->pas.cl = data->pas.ct = 0.0f;
+    data->pas.cr = data->pas.cb = 1.0f;
+  }
+
+  data->pcr.ratio_n = data->pcr.ratio_d = 0; // freehand
+
+  // Convert image in image-centered coordinate system, [-image_size / 2; + image_size / 2]
+  cx = (data->pcr.cx - 0.5f) * data->iwidth;
+  cw = (data->pcr.cw - 0.5f) * data->iwidth;
+  cy = (data->pcr.cy - 0.5f) * data->iheight;
+  ch = (data->pcr.ch - 0.5f) * data->iheight;
+
+  // Rotate the cropped zone according to rotation angle
+  // All rotations done using center of the image
+  rangle = deg2rad(-data->pas.rotation);
+  rotate_xy(&cx, &cy, -rangle);
+  rotate_xy(&cw, &ch, -rangle);
+
+  // the corners are now those of the frame, which the vignette sees upright
+  data->fratio = (cw - cx) / (ch - cy);
+  if(orientation & ORIENTATION_SWAP_XY) data->fratio = 1.0f / data->fratio;
+
+  // Calculate the new overall image size (black zone included) after rotation
+  // rangle is limited to -45°;+45° by LR
+  new_width  = rotate_x(+data->iwidth, -data->iheight, -fabs(rangle));
+  new_height = rotate_y(+data->iwidth, +data->iheight, -fabs(rangle));
+
+  // apply new size & convert image back in initial coordinate system [0.0 ; +1.0]
+  data->pcr.cx = round5((cx / new_width)  + 0.5f);
+  data->pcr.cw = round5((cw / new_width)  + 0.5f);
+  data->pcr.cy = round5((cy / new_height) + 0.5f);
+  data->pcr.ch = round5((ch / new_height) + 0.5f);
+
+  // adjust crop data according to the orientation - Must be done after rotation
+  if(orientation & ORIENTATION_FLIP_X)
+    flip(&data->pcr.cx, &data->pcr.cw);
+  if(orientation & ORIENTATION_FLIP_Y)
+    flip(&data->pcr.cy, &data->pcr.ch);
+  if(orientation & ORIENTATION_SWAP_XY)
+  {
+    swap(&data->pcr.cx, &data->pcr.cy);
+    swap(&data->pcr.cw, &data->pcr.ch);
+  }
+}
+
+// Lightroom's adjustments are relative to its default rendering, so add
+// them to the module's defaults for this image, which in the
+// scene-referred workflow hold the baseline boost and bias compensation
+static dt_iop_exposure_params_v7_t _lr_exposure_to_dt(const dt_iop_exposure_params_v7_t *defaults,
+                                                      const lr_data_t *data)
+{
+  dt_iop_exposure_params_v7_t pe = { .mode = EXPOSURE_MODE_MANUAL,
+                                     .deflicker_percentile = 50.0f,
+                                     .deflicker_target_level = -4.0f,
+                                     .compensate_hilite_pres = TRUE };
+  if(defaults)
+    memcpy(&pe, defaults, sizeof(pe));
+
+  pe.exposure += data->pe.exposure;
+  pe.black += data->pe.black;
+  return pe;
+}
+
+// builds the tonecurve params from Lightroom's point and parametric curves,
+// returns FALSE when the result would leave the image unchanged
+static gboolean _lr_tonecurve_to_dt(lr_data_t *data)
+{
+  if(data->n_pts < 2 && data->ptc_value[0] == 0 && data->ptc_value[1] == 0
+     && data->ptc_value[2] == 0 && data->ptc_value[3] == 0)
+    return FALSE;
+
+  data->ptc.tonecurve_nodes[ch_a] = 7;
+  data->ptc.tonecurve_nodes[ch_b] = 7;
+  data->ptc.tonecurve_type[ch_L] = CUBIC_SPLINE;
+  data->ptc.tonecurve_type[ch_a] = CUBIC_SPLINE;
+  data->ptc.tonecurve_type[ch_b] = CUBIC_SPLINE;
+  data->ptc.tonecurve_autoscale_ab = LRDT_TONECURVE_AUTOMATIC_RGB;
+  data->ptc.tonecurve_preset = 0;
+  data->ptc.tonecurve_unbound_ab = 1;
+  data->ptc.preserve_colors = LRDT_RGB_NORM_AVERAGE;
+
+  float linear_ab[7] = { 0.0, 0.08, 0.3, 0.5, 0.7, 0.92, 1.0 };
+
+  // linear a, b curves
+  for(int k = 0; k < 7; k++) data->ptc.tonecurve[ch_a][k].x = linear_ab[k];
+  for(int k = 0; k < 7; k++) data->ptc.tonecurve[ch_a][k].y = linear_ab[k];
+  for(int k = 0; k < 7; k++) data->ptc.tonecurve[ch_b][k].x = linear_ab[k];
+  for(int k = 0; k < 7; k++) data->ptc.tonecurve[ch_b][k].y = linear_ab[k];
+
+  // Lightroom writes the point curve for its presets too, Linear included
+  float px[MAX_PTS] = { 0.0f, 1.0f };
+  float py[MAX_PTS] = { 0.0f, 1.0f };
+  // a single point is no curve, so keep the identity rather than half of it
+  const int n_pts = data->n_pts >= 2 ? data->n_pts : 2;
+  for(int k = 0; data->n_pts >= 2 && k < n_pts; k++)
+  {
+    px[k] = data->curve_pts[k][0] / 255.0f;
+    py[k] = data->curve_pts[k][1] / 255.0f;
+  }
+
+  const gboolean parametric = data->ptc_value[0] != 0 || data->ptc_value[1] != 0
+                              || data->ptc_value[2] != 0 || data->ptc_value[3] != 0;
+
+  if(!parametric)
+  {
+    data->ptc.tonecurve_nodes[ch_L] = n_pts;
+    for(int k = 0; k < n_pts; k++)
+    {
+      data->ptc.tonecurve[ch_L][k].x = px[k];
+      data->ptc.tonecurve[ch_L][k].y = py[k];
+    }
+  }
+  else
+  {
+    // Lightroom applies the point curve on top of the parametric one;
+    // sample the two together, as no handful of nodes follows both
+    float *tangents = interpolate_set(n_pts, px, py, CUBIC_SPLINE);
+    data->ptc.tonecurve_nodes[ch_L] = DT_IOP_TONECURVE_MAXNODES;
+    for(int k = 0; k < DT_IOP_TONECURVE_MAXNODES; k++)
+    {
+      const float x = (float)k / (DT_IOP_TONECURVE_MAXNODES - 1);
+      const float y = _lr_parametric_curve(x, data->ptc_split, data->ptc_value);
+      data->ptc.tonecurve[ch_L][k].x = x;
+      data->ptc.tonecurve[ch_L][k].y
+          = tangents ? CLAMP(interpolate_val(n_pts, px, y, py, tangents, CUBIC_SPLINE), 0.0f, 1.0f) : y;
+    }
+    free(tangents);
+  }
+
+  return !_tonecurve_is_identity(&data->ptc);
 }
 
 gboolean dt_lightroom_import(dt_imgid_t imgid, dt_develop_t *dev, gboolean iauto)
@@ -1714,85 +2006,9 @@ gboolean dt_lightroom_import(dt_imgid_t imgid, dt_develop_t *dev, gboolean iauto
 
   lr_data_t data;
 
-  memset(&data, 0, sizeof(data));
+  _lr_data_init(&data);
 
-  data.has_crop = FALSE;
-  data.has_flip = FALSE;
-  data.has_exposure = FALSE;
-  data.has_vignette = FALSE;
-  data.has_grain = FALSE;
-  data.n_pts = 0;
-  // Lightroom's defaults, which it leaves out of the XMP
-  data.ptc_split[0] = 0.25f;
-  data.ptc_split[1] = 0.50f;
-  data.ptc_split[2] = 0.75f;
-  data.has_colorzones = FALSE;
-  data.has_splittoning = FALSE;
-  data.pst.balance = lr2dt_splittoning_balance(0.0f);
-  data.has_bilat = FALSE;
-  data.has_tags = FALSE;
-  data.rating = 0;
-  data.has_rating = FALSE;
-  data.lat = NAN;
-  data.lon = NAN;
-  data.lat_ref = NAN;
-  data.lon_ref = NAN;
-  data.has_gps = FALSE;
-  data.color = 0;
-  data.has_colorlabel = FALSE;
-  data.fratio = NAN;                // until the crop sets it
-  data.crop_roundness = NAN;        // from lightroom
-  data.vignette_midpoint = 50.0f;   // Lightroom's defaults
-  data.vignette_feather = 50.0f;
-  data.iwidth = 0;
-  data.iheight = 0;                 // image width / height
-  data.orientation = EXIF_ORIENTATION_NONE;
-
-  // record the name-spaces needed for the parsing
-  xmlXPathRegisterNs
-    (xpathCtx,
-     BAD_CAST "crs",
-     BAD_CAST "http://ns.adobe.com/camera-raw-settings/1.0/");
-  xmlXPathRegisterNs
-    (xpathCtx,
-     BAD_CAST "dc",
-     BAD_CAST "http://purl.org/dc/elements/1.1/");
-  xmlXPathRegisterNs
-    (xpathCtx,
-     BAD_CAST "tiff",
-     BAD_CAST "http://ns.adobe.com/tiff/1.0/");
-  xmlXPathRegisterNs
-    (xpathCtx,
-     BAD_CAST "xmp",
-     BAD_CAST "http://ns.adobe.com/xap/1.0/");
-  xmlXPathRegisterNs
-    (xpathCtx,
-     BAD_CAST "exif",
-     BAD_CAST "http://ns.adobe.com/exif/1.0/");
-  xmlXPathRegisterNs
-    (xpathCtx,
-     BAD_CAST "lr",
-     BAD_CAST "http://ns.adobe.com/lightroom/1.0/");
-  xmlXPathRegisterNs
-    (xpathCtx,
-     BAD_CAST "rdf",
-     BAD_CAST "http://www.w3.org/1999/02/22-rdf-syntax-ns#");
-
-  // All prefixes to parse from the XMP document
-  static char *names[] = { "crs", "dc", "tiff", "xmp", "exif", "lr", NULL };
-
-  for(int i=0; names[i]!=NULL; i++)
-    {
-      char expr[50];
-
-      /* Lr 7.0 CC (nodes) */
-      snprintf(expr, sizeof(expr), "//%s:*", names[i]);
-      _handle_xpath(dev, doc, imgid, xpathCtx, (const xmlChar *)expr, &data);
-
-      /* Lr up to 6.0 (attributes) */
-      snprintf(expr, sizeof(expr), "//@%s:*", names[i]);
-      _handle_xpath(dev, doc, imgid, xpathCtx, (const xmlChar *)expr, &data);
-    }
+  _lr_parse(dev, doc, xpathCtx, imgid, &data);
 
   xmlXPathFreeObject(xpathObj);
   xmlXPathFreeContext(xpathCtx);
@@ -1815,67 +2031,11 @@ gboolean dt_lightroom_import(dt_imgid_t imgid, dt_develop_t *dev, gboolean iauto
 
   if(dev != NULL && data.has_crop)
   {
-    double rangle;
-    double cx, cw, cy, ch;
-    double new_width, new_height;
-    dt_image_orientation_t orientation = dt_image_orientation_to_flip_bits(data.orientation);
+    _lr_crop_to_dt(&data);
 
-    // ashift runs before flip in the pipe, so it rotates in sensor
-    // orientation, the same space Lightroom's CropAngle is expressed in
     if(data.pas.rotation != 0.0f)
-    {
-      data.pas.f_length = 28.0f;
-      data.pas.crop_factor = 1.0f;
-      data.pas.orthocorr = 100.0f;
-      data.pas.aspect = 1.0f;
-      data.pas.mode = ASHIFT_MODE_GENERIC;
-      data.pas.cropmode = ASHIFT_CROP_OFF; // the crop module below does the cropping
-      data.pas.cl = data.pas.ct = 0.0f;
-      data.pas.cr = data.pas.cb = 1.0f;
-
       dt_add_hist(imgid, "ashift", (dt_iop_params_t *)&data.pas, sizeof(dt_iop_ashift_params_v5_t), imported,
                   sizeof(imported), LRDT_ASHIFT_VERSION, &n_import);
-    }
-
-    data.pcr.ratio_n = data.pcr.ratio_d = 0; // freehand
-
-    // Convert image in image-centered coordinate system, [-image_size / 2; + image_size / 2]
-    cx = (data.pcr.cx - 0.5f) * data.iwidth;
-    cw = (data.pcr.cw - 0.5f) * data.iwidth;
-    cy = (data.pcr.cy - 0.5f) * data.iheight;
-    ch = (data.pcr.ch - 0.5f) * data.iheight;
-
-    // Rotate the cropped zone according to rotation angle
-    // All rotations done using center of the image
-    rangle = deg2rad(-data.pas.rotation);
-    rotate_xy(&cx, &cy, -rangle);
-    rotate_xy(&cw, &ch, -rangle);
-
-    // the corners are now those of the frame, which the vignette sees upright
-    data.fratio = (cw - cx) / (ch - cy);
-    if(orientation & ORIENTATION_SWAP_XY) data.fratio = 1.0f / data.fratio;
-
-    // Calculate the new overall image size (black zone included) after rotation
-    // rangle is limited to -45°;+45° by LR
-    new_width  = rotate_x(+data.iwidth, -data.iheight, -fabs(rangle));
-    new_height = rotate_y(+data.iwidth, +data.iheight, -fabs(rangle));
-
-    // apply new size & convert image back in initial coordinate system [0.0 ; +1.0]
-    data.pcr.cx = round5((cx / new_width)  + 0.5f);
-    data.pcr.cw = round5((cw / new_width)  + 0.5f);
-    data.pcr.cy = round5((cy / new_height) + 0.5f);
-    data.pcr.ch = round5((ch / new_height) + 0.5f);
-
-    // adjust crop data according to the orientation - Must be done after rotation
-    if(orientation & ORIENTATION_FLIP_X)
-      flip(&data.pcr.cx, &data.pcr.cw);
-    if(orientation & ORIENTATION_FLIP_Y)
-      flip(&data.pcr.cy, &data.pcr.ch);
-    if(orientation & ORIENTATION_SWAP_XY)
-    {
-      swap(&data.pcr.cx, &data.pcr.cy);
-      swap(&data.pcr.cw, &data.pcr.ch);
-    }
 
     dt_add_hist(imgid, "crop", (dt_iop_params_t *)&data.pcr, sizeof(dt_iop_crop_params_v3_t), imported,
                 sizeof(imported), LRDT_CROP_VERSION, &n_import);
@@ -1893,20 +2053,11 @@ gboolean dt_lightroom_import(dt_imgid_t imgid, dt_develop_t *dev, gboolean iauto
 
   if(dev != NULL && data.has_exposure)
   {
-    // Lightroom's adjustments are relative to its default rendering, so add
-    // them to the module's defaults for this image, which in the
-    // scene-referred workflow hold the baseline boost and bias compensation
-    dt_iop_exposure_params_v7_t pe = { .mode = EXPOSURE_MODE_MANUAL,
-                                    .deflicker_percentile = 50.0f,
-                                    .deflicker_target_level = -4.0f,
-                                    .compensate_hilite_pres = TRUE };
-    const dt_iop_module_t *exposure =
-      dt_iop_get_module_by_op_priority(dev->iop, "exposure", 0);
-    if(exposure && exposure->params_size == sizeof(pe))
-      memcpy(&pe, exposure->default_params, sizeof(pe));
-
-    pe.exposure += data.pe.exposure;
-    pe.black += data.pe.black;
+    const dt_iop_module_t *exposure = dt_iop_get_module_by_op_priority(dev->iop, "exposure", 0);
+    const dt_iop_exposure_params_v7_t pe =
+      _lr_exposure_to_dt(exposure && exposure->params_size == sizeof(dt_iop_exposure_params_v7_t)
+                         ? exposure->default_params : NULL,
+                         &data);
 
     dt_add_hist(imgid, "exposure", (dt_iop_params_t *)&pe, sizeof(dt_iop_exposure_params_v7_t), imported,
                 sizeof(imported), LRDT_EXPOSURE_VERSION, &n_import);
@@ -1924,43 +2075,7 @@ gboolean dt_lightroom_import(dt_imgid_t imgid, dt_develop_t *dev, gboolean iauto
 
   if(dev != NULL && data.has_vignette)
   {
-    data.pv.autoratio = FALSE;
-    data.pv.dithering = DITHER_8BIT;
-    data.pv.center.x = 0.0;
-    data.pv.center.y = 0.0;
-    data.pv.shape = 1.0;
-    data.pv.falloff_scale = lr2dt_vignette_falloff(data.vignette_feather);
-    // each step of the midpoint moves the falloff out by 0.576%
-    data.pv.scale = lr2dt_vignette_center(data.vignette_feather)
-                    + 0.576f * (data.vignette_midpoint - 50.0f) - data.pv.falloff_scale / 2.0f;
-
-    // the vignette runs after crop and flip, so it takes the shape of the
-    // cropped frame, upright. Without ImageWidth/ImageLength, which only
-    // a future Lightroom might leave out, there is no shape to follow
-    float frame_ratio = 1.0f;
-    if(data.has_crop && isfinite(data.fratio) && data.fratio > 0.0f)
-      frame_ratio = data.fratio;
-    else if(data.iwidth > 0 && data.iheight > 0)
-    {
-      frame_ratio = (float)data.iwidth / (float)data.iheight;
-      if(dt_image_orientation_to_flip_bits(data.orientation) & ORIENTATION_SWAP_XY)
-        frame_ratio = 1.0f / frame_ratio;
-    }
-    // the module takes a width/height ratio r up to 1 as is, and above 1 as
-    // 2 - 1/r; either way its scale is along the frame's long side
-    data.pv.whratio = frame_ratio <= 1.0f ? frame_ratio : 2.0f - 1.0f / frame_ratio;
-
-    //  Adjust scale and ratio based on the roundness. On Lightroom changing
-    //  the roundness change the width and the height of the vignette.
-
-    if(data.crop_roundness > 0)
-    {
-      float newratio = data.pv.whratio - (data.pv.whratio - 1) * (data.crop_roundness / 100.0);
-      float dscale = (1 - (newratio / data.pv.whratio)) / 2.0;
-
-      data.pv.scale -= dscale * 100.0;
-      data.pv.whratio = newratio;
-    }
+    _lr_vignette_to_dt(&data);
 
     dt_add_hist(imgid, "vignette", (dt_iop_params_t *)&data.pv, sizeof(dt_iop_vignette_params_v3_t), imported,
                 sizeof(imported), LRDT_VIGNETTE_VERSION, &n_import);
@@ -1973,74 +2088,12 @@ gboolean dt_lightroom_import(dt_imgid_t imgid, dt_develop_t *dev, gboolean iauto
     refresh_needed = TRUE;
   }
 
-  if(dev != NULL && (data.n_pts >= 2 || data.ptc_value[0] != 0 || data.ptc_value[1] != 0
-                     || data.ptc_value[2] != 0 || data.ptc_value[3] != 0))
+  if(dev != NULL && _lr_tonecurve_to_dt(&data))
   {
-    data.ptc.tonecurve_nodes[ch_a] = 7;
-    data.ptc.tonecurve_nodes[ch_b] = 7;
-    data.ptc.tonecurve_type[ch_L] = CUBIC_SPLINE;
-    data.ptc.tonecurve_type[ch_a] = CUBIC_SPLINE;
-    data.ptc.tonecurve_type[ch_b] = CUBIC_SPLINE;
-    data.ptc.tonecurve_autoscale_ab = LRDT_TONECURVE_AUTOMATIC_RGB;
-    data.ptc.tonecurve_preset = 0;
-    data.ptc.tonecurve_unbound_ab = 1;
-    data.ptc.preserve_colors = LRDT_RGB_NORM_AVERAGE;
-
-    float linear_ab[7] = { 0.0, 0.08, 0.3, 0.5, 0.7, 0.92, 1.0 };
-
-    // linear a, b curves
-    for(int k = 0; k < 7; k++) data.ptc.tonecurve[ch_a][k].x = linear_ab[k];
-    for(int k = 0; k < 7; k++) data.ptc.tonecurve[ch_a][k].y = linear_ab[k];
-    for(int k = 0; k < 7; k++) data.ptc.tonecurve[ch_b][k].x = linear_ab[k];
-    for(int k = 0; k < 7; k++) data.ptc.tonecurve[ch_b][k].y = linear_ab[k];
-
-    // Lightroom writes the point curve for its presets too, Linear included
-    float px[MAX_PTS] = { 0.0f, 1.0f };
-    float py[MAX_PTS] = { 0.0f, 1.0f };
-    // a single point is no curve, so keep the identity rather than half of it
-    const int n_pts = data.n_pts >= 2 ? data.n_pts : 2;
-    for(int k = 0; data.n_pts >= 2 && k < n_pts; k++)
-    {
-      px[k] = data.curve_pts[k][0] / 255.0f;
-      py[k] = data.curve_pts[k][1] / 255.0f;
-    }
-
-    const gboolean parametric = data.ptc_value[0] != 0 || data.ptc_value[1] != 0
-                                || data.ptc_value[2] != 0 || data.ptc_value[3] != 0;
-
-    if(!parametric)
-    {
-      data.ptc.tonecurve_nodes[ch_L] = n_pts;
-      for(int k = 0; k < n_pts; k++)
-      {
-        data.ptc.tonecurve[ch_L][k].x = px[k];
-        data.ptc.tonecurve[ch_L][k].y = py[k];
-      }
-    }
-    else
-    {
-      // Lightroom applies the point curve on top of the parametric one;
-      // sample the two together, as no handful of nodes follows both
-      float *tangents = interpolate_set(n_pts, px, py, CUBIC_SPLINE);
-      data.ptc.tonecurve_nodes[ch_L] = DT_IOP_TONECURVE_MAXNODES;
-      for(int k = 0; k < DT_IOP_TONECURVE_MAXNODES; k++)
-      {
-        const float x = (float)k / (DT_IOP_TONECURVE_MAXNODES - 1);
-        const float y = _lr_parametric_curve(x, data.ptc_split, data.ptc_value);
-        data.ptc.tonecurve[ch_L][k].x = x;
-        data.ptc.tonecurve[ch_L][k].y
-            = tangents ? CLAMP(interpolate_val(n_pts, px, y, py, tangents, CUBIC_SPLINE), 0.0f, 1.0f) : y;
-      }
-      free(tangents);
-    }
-
-    if(!_tonecurve_is_identity(&data.ptc))
-    {
-      dt_add_hist(imgid, "tonecurve", (dt_iop_params_t *)&data.ptc,
-                  sizeof(dt_iop_tonecurve_params_v5_t), imported, sizeof(imported),
-                  LRDT_TONECURVE_VERSION, &n_import);
-      refresh_needed = TRUE;
-    }
+    dt_add_hist(imgid, "tonecurve", (dt_iop_params_t *)&data.ptc,
+                sizeof(dt_iop_tonecurve_params_v5_t), imported, sizeof(imported),
+                LRDT_TONECURVE_VERSION, &n_import);
+    refresh_needed = TRUE;
   }
 
   if(dev != NULL && data.has_colorzones)
